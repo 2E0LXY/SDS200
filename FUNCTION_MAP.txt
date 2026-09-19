@@ -1,0 +1,38 @@
+SDS200 WebApp v0.7.1-native - important control mapping
+
+Front-panel remote keys
+  M  Menu / Back
+  F  Function
+  L  Avoid
+  .  Decimal / No
+  E  Enter / Yes
+  <  Rotary left
+  >  Rotary right
+  ^  Rotary push
+  V  Volume/light knob push
+  Q  Squelch/menu knob push
+  Y  Replay
+  A  Soft key 1
+  B  Soft key 2
+  C  Soft key 3
+  Z  Zip / Location
+  T  Service Types
+  R  Range
+  0-9 numeric keypad
+
+Volume: 0-29
+Squelch: 0-19
+Favorites Quick Keys: 00-99
+
+Control confirmation
+  Every web key press sends the documented KEY,<code>,P command, then performs a fresh STS read and returns/renders the scanner display as confirmation.
+
+Audio
+  No background port-554 probe.
+  Listen Live owns RTSP startup: TCP connect -> OPTIONS -> DESCRIBE -> SETUP -> PLAY.
+  GET_PARAMETER keeps the same session alive.
+  Final audio owner release sends TEARDOWN before close.
+  Browser WAV source is exposed only after real RTP is received.
+
+Logging components
+  APP HTTP UDP CONTROL STS DISCOVERY LEASE AUDIO RTSP RTP WATERFALL RECORD BROWSER

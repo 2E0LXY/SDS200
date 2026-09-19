@@ -1,0 +1,42 @@
+name: build-windows
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Check browser JavaScript
+        run: node --check static/app.js
+      - name: Build Windows amd64
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" -o dist/SDS200-WebApp.exe .
+          sha256sum dist/SDS200-WebApp.exe > dist/SHA256.txt
+          cp WINDOWS_TEST_README.txt FUNCTION_MAP.txt README.md dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SDS200-Windows-amd64
+          path: dist/
+          if-no-files-found: error

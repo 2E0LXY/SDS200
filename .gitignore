@@ -1,0 +1,6 @@
+*.exe
+*.zip
+*.log
+SDS200-WebApp
+/dist/
+.DS_Store
