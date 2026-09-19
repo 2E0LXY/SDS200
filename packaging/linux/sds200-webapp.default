@@ -1,0 +1,5 @@
+# Extra arguments for sds200-webapp (see: sds200-webapp -h)
+# Examples:
+#   SDS200_ARGS="-scanner 192.168.1.211"
+#   SDS200_ARGS="-listen 127.0.0.1:8765"   # when fronted by Caddy
+SDS200_ARGS=""

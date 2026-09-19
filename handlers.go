@@ -32,7 +32,7 @@ func (a *App) apiCapabilities(w http.ResponseWriter, r *http.Request) {
 	for k := range navTargets {
 		targets = append(targets, k)
 	}
-	writeJSON(w, 200, map[string]any{"key_codes": keyCodes, "navigation_targets": targets, "volume": map[string]int{"min": 0, "max": 29}, "squelch": map[string]int{"min": 0, "max": 19}, "favorites_quick_keys": true, "waterfall": true, "analysis": []string{"SYSTEM_STATUS", "CURRENT_ACTIVITY", "LCN_MONITOR", "RF_POWER_PLOT"}, "scanner_recording": true, "remote_recording": true, "service_type_direct_write": false, "logging": []string{"ERROR", "WARN", "INFO", "DEBUG", "TRACE"}})
+	writeJSON(w, 200, map[string]any{"key_codes": keyCodes, "navigation_targets": targets, "volume": map[string]int{"min": 0, "max": 29}, "squelch": map[string]int{"min": 0, "max": 19}, "favorites_quick_keys": true, "waterfall": true, "analysis": []string{"SYSTEM_STATUS", "CURRENT_ACTIVITY", "LCN_MONITOR", "RF_POWER_PLOT"}, "scanner_recording": true, "remote_recording": true, "service_type_direct_write": true, "clock": true, "logging": []string{"ERROR", "WARN", "INFO", "DEBUG", "TRACE"}})
 }
 func (a *App) apiState(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, "GET") {
@@ -231,9 +231,22 @@ func (a *App) apiKey(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, err)
 		return
 	}
-	time.Sleep(90 * time.Millisecond)
-	if sts, e := a.command("STS", 1200*time.Millisecond); e == nil {
-		disp := parseSTS(sts.Raw, sts.ElapsedMS)
+	// The scanner blanks its display briefly while redrawing after a key, so
+	// retry the STS confirmation a few times until a non-empty frame arrives.
+	var disp STSDisplay
+	var e error
+	for attempt := 0; attempt < 4; attempt++ {
+		time.Sleep(time.Duration(90+attempt*110) * time.Millisecond)
+		var sts CommandResult
+		if sts, e = a.command("STS", 1200*time.Millisecond); e != nil {
+			continue
+		}
+		disp = parseSTS(sts.Raw, sts.ElapsedMS)
+		if !displayBlank(disp) {
+			break
+		}
+	}
+	if e == nil {
 		d["display"] = disp
 		a.log.Info("CONTROL", "Key confirmed by STS", map[string]any{"button": label, "key": key, "display": displaySummary(disp)})
 	} else {
@@ -241,6 +254,14 @@ func (a *App) apiKey(w http.ResponseWriter, r *http.Request) {
 	}
 	a.invalidateState()
 	writeJSON(w, 200, d)
+}
+func displayBlank(d STSDisplay) bool {
+	for _, l := range d.Lines {
+		if strings.TrimSpace(l.Text) != "" {
+			return false
+		}
+	}
+	return true
 }
 func displaySummary(d STSDisplay) string {
 	parts := []string{}
@@ -1039,3 +1060,106 @@ func routeLocalIPv4(host string, port int) string {
 
 var _ = json.Valid
 var _ = os.ErrNotExist
+
+// Service types: SVC returns 37 preset + 10 custom 0/1 flags (spec v2.00 p.6).
+var presetServiceTypes = []string{"Multi-Dispatch", "Law Dispatch", "Fire Dispatch", "EMS Dispatch", "", "Multi-Tac", "Law Tac", "Fire-Tac", "EMS-Tac", "", "Interop", "Hospital", "Ham", "Public Works", "Aircraft", "Federal", "Business", "", "", "Railroad", "Other", "Multi-Talk", "Law Talk", "Fire-Talk", "EMS-Talk", "Transportation", "", "", "Emergency Ops", "Military", "Media", "Schools", "Security", "Utilities", "", "", "Corrections"}
+
+func (a *App) apiServiceTypes(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		res, err := a.command("SVC", 1500*time.Millisecond)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		f := packetFields(res.Raw, "SVC")
+		if len(f) < 47 {
+			errJSON(w, &httpError{502, fmt.Sprintf("SVC returned %d fields, expected 47", len(f))})
+			return
+		}
+		items := make([]map[string]any, 0, 47)
+		for i := 0; i < 47; i++ {
+			name := ""
+			if i < 37 {
+				name = presetServiceTypes[i]
+			} else {
+				name = fmt.Sprintf("Custom %d", i-36)
+			}
+			items = append(items, map[string]any{"slot": i, "name": name, "enabled": strings.TrimSpace(f[i]) == "1", "custom": i >= 37})
+		}
+		writeJSON(w, 200, map[string]any{"items": items, "raw": res.Raw})
+	case "POST":
+		if err := a.requireControl(r); err != nil {
+			errJSON(w, err)
+			return
+		}
+		var b struct {
+			States []int `json:"states"`
+		}
+		if err := readJSON(r, &b); err != nil {
+			errJSON(w, err)
+			return
+		}
+		if len(b.States) != 47 {
+			errJSON(w, &httpError{422, "SVC requires exactly 47 states (37 preset + 10 custom)"})
+			return
+		}
+		for _, v := range b.States {
+			if v != 0 && v != 1 {
+				errJSON(w, &httpError{422, "service type states must be 0 or 1"})
+				return
+			}
+		}
+		a.log.Info("CONTROL", "Service types write", nil)
+		d, err := a.execWrite("SVC,"+joinInts(b.States), 2*time.Second)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, d)
+	default:
+		writeJSON(w, 405, map[string]any{"detail": "method not allowed"})
+	}
+}
+
+// Clock: DTM,[DST],[YYYY],[MM],[DD],[hh],[mm],[ss],[RTC status].
+func (a *App) apiClock(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		res, err := a.command("DTM", 1200*time.Millisecond)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		f := packetFields(res.Raw, "DTM")
+		if len(f) < 7 {
+			errJSON(w, &httpError{502, "unexpected DTM response"})
+			return
+		}
+		n := make([]int, 7)
+		for i := 0; i < 7; i++ {
+			n[i], _ = strconv.Atoi(strings.TrimSpace(f[i]))
+		}
+		scanner := time.Date(n[1], time.Month(n[2]), n[3], n[4], n[5], n[6], 0, time.Local)
+		now := time.Now()
+		writeJSON(w, 200, map[string]any{"scanner_time": scanner.Format("2006-01-02 15:04:05"), "host_time": now.Format("2006-01-02 15:04:05"), "dst": n[0] == 1, "rtc_ok": len(f) > 7 && strings.TrimSpace(f[7]) == "1", "offset_s": int(scanner.Sub(now).Seconds()), "raw": res.Raw})
+	case "POST":
+		if err := a.requireControl(r); err != nil {
+			errJSON(w, err)
+			return
+		}
+		// The scanner displays DTM time as-is; write host local wall-clock time
+		// with the DST flag cleared so no further offset is applied.
+		now := time.Now()
+		wire := fmt.Sprintf("DTM,0,%d,%d,%d,%d,%d,%d", now.Year(), int(now.Month()), now.Day(), now.Hour(), now.Minute(), now.Second())
+		a.log.Info("CONTROL", "Scanner clock sync", map[string]any{"command": wire})
+		d, err := a.execWrite(wire, 1500*time.Millisecond)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		writeJSON(w, 200, d)
+	default:
+		writeJSON(w, 405, map[string]any{"detail": "method not allowed"})
+	}
+}

@@ -1,0 +1,9 @@
+# Example Caddy front end. Run the app with SDS200_ARGS="-listen 127.0.0.1:8765"
+# and set a control token in /var/lib/sds200-webapp/config.json before exposing it.
+sds200.example.lan {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8765 {
+		# live.wav is an endless stream; do not buffer it.
+		flush_interval -1
+	}
+}

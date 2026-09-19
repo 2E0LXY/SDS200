@@ -1,49 +1,52 @@
 # SDS200 WebApp
 
-Standalone Windows web remote for Uniden SDS200 / SDS200E scanners.
+Browser remote control for Uniden SDS200 / SDS200E scanners over the scanner's LAN port. One static Go binary; no runtime dependencies.
 
-This source tree was reconstructed from the v0.6.2 embedded web assets and the validated scanner protocol behavior from the project test history. It is not a byte-for-byte recovery of the earlier lost Go source.
+| Platform | Package |
+|---|---|
+| Windows x64 | `SDS200-WebApp-<ver>-windows-amd64.zip` — run `SDS200-WebApp.exe`, browser opens `http://127.0.0.1:8765` |
+| Debian / Ubuntu / Raspberry Pi OS | `sds200-webapp_<ver>_{amd64,arm64,armhf}.deb` — installs a hardened systemd service on port 8765 |
+| Guition JC8012P4A1 (ESP32-P4 10.1" panel) | see `firmware/jc8012p4a1/` |
+
+## Protocol (verified on SDS200E firmware 1.23.15)
+
+| Channel | Detail |
+|---|---|
+| Control | UDP 50536, CR-terminated commands per *SDS Series Remote Command Specification V2.00* (MDL, VER, GSI, STS, GST, KEY, VOL, SQL, FQK, SVC, DTM, GLT, HLD, NXT/PRV, JPM, GWF/PWF, AST/APR, URC, MSI) |
+| Audio | RTSP/1.0 TCP 554 `rtsp://<ip>/au:scanner.au` → RTP PCMU (G.711 µ-law) 8 kHz mono, 320-byte/40 ms packets; GET_PARAMETER keepalive every 15 s |
+| Not supported | `KAL` returns `ERR` on 1.23.15 |
+
+### Audio rules
+- The scanner allows **one** RTSP session. The app always sends TEARDOWN on stop, on shutdown (Ctrl+C / SIGTERM / service stop) and when the last listener leaves. A leaked session makes TCP 554 refuse connections until the scanner is power-cycled.
+- No bare TCP 554 reachability probes; only **Listen Live** opens RTSP. Remote recording shares the live session.
+- After SETUP the app sends a 4-byte datagram from its RTP port to the scanner's RTP source port. This opens the host firewall's stateful UDP path, so no inbound firewall rule is needed on Windows or Linux.
+
+## Usage
+
+```
+SDS200-WebApp [-scanner 192.168.1.211] [-listen 0.0.0.0:8765] [-data-dir DIR] [-no-browser] [-version]
+```
+
+Data (config, logs, WAV recordings): Windows `%LOCALAPPDATA%\SDS200-WebApp`, Linux service `/var/lib/sds200-webapp`, otherwise `-data-dir` / `SDS200_DATA_DIR`.
+
+Linux service options: `/etc/default/sds200-webapp` (`SDS200_ARGS`). To front it with Caddy, bind to loopback (`-listen 127.0.0.1:8765`), set `control_token` in `config.json`, and use `/usr/share/doc/sds200-webapp/Caddyfile.example`.
 
 ## Design rules
-
 - Real scanner only: no simulation, demo telemetry, synthetic waterfall or fallback audio.
-- UDP scanner control uses port 50536.
-- Network audio uses a single RTSP session on TCP 554 at `/au:scanner.au`, with RTP/PCMU audio.
-- There are no background or bare TCP 554 reachability probes. Only **Listen Live** may create an RTSP session. Remote WebApp recording requires an already-running live audio session and shares it.
-- Scanner display confirmation uses fresh STS readback after control-key presses.
-- Firmware/database/Profile management remains a Sentinel/USB task and is not represented as a LAN control.
+- Key presses are confirmed by a fresh STS read (retried while the scanner redraws).
+- Shutdown only restores scan mode if the app itself started the waterfall.
+- Firmware/database/profile management stays a Sentinel/USB task.
 
 ## Logging
-
-Logs are written to:
-
-`%LOCALAPPDATA%\SDS200-WebApp\logs\sds200-YYYY-MM-DD.log`
-
-Levels: `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`.
-
-Structured components include `APP`, `HTTP`, `UDP`, `CONTROL`, `STS`, `DISCOVERY`, `LEASE`, `AUDIO`, `RTSP`, `RTP`, `WATERFALL`, `RECORD`, and browser-side events. The System page can change the log level, filter/search the in-memory log, download the current log, open the log directory, and copy a diagnostic bundle.
-
-`TRACE` includes raw protocol traffic; use it only while diagnosing a problem because it is intentionally verbose.
+`<data-dir>/logs/sds200-YYYY-MM-DD.log`, levels ERROR/WARN/INFO/DEBUG/TRACE (TRACE includes raw protocol traffic). The System page can change level, filter, download, and copy a diagnostic bundle.
 
 ## Build
 
-Requires Go 1.23+ and Node.js for the JavaScript syntax check.
-
 ```bash
-go test ./...
-go vet ./...
-node --check static/app.js
+go test ./... && go vet ./...
+go run github.com/evanw/esbuild/cmd/esbuild@v0.25.10 static/app.js --log-level=warning >/dev/null   # JS syntax check, no Node
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o SDS200-WebApp.exe .
+scripts/build-deb.sh 0.8.0 arm64 dist
 ```
 
-## GitHub Actions
-
-`.github/workflows/build.yml` runs tests/vet/JavaScript checking and cross-compiles the Windows amd64 executable. It uploads a Windows build artifact for each push/PR/manual run.
-
-## Current version
-
-`0.7.1-native`
-
-## v0.7.1 parser fix
-
-`GSI,<XML>,` can arrive as a standalone UDP datagram before the `ScannerInfo` XML document. v0.7.1 keeps waiting for the XML instead of treating that marker as a complete response. This fixes repeated `ScannerInfo XML not found` warnings seen on the physical SDS200E while preserving ordinary non-XML command handling.
+GitHub Actions (`.github/workflows/build.yml`) tests, builds the Windows zip and three .debs on every push, and publishes a GitHub Release on `v*` tags.

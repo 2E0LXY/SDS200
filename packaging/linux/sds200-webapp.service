@@ -1,0 +1,33 @@
+[Unit]
+Description=SDS200 WebApp (Uniden SDS200 network remote)
+Documentation=https://github.com/2E0LXY/SDS200
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/sds200-webapp
+ExecStart=/usr/bin/sds200-webapp -no-browser -data-dir /var/lib/sds200-webapp $SDS200_ARGS
+DynamicUser=yes
+StateDirectory=sds200-webapp
+Restart=on-failure
+RestartSec=3
+# Allow time for RTSP TEARDOWN so the scanner's single audio session is released.
+TimeoutStopSec=10
+KillSignal=SIGTERM
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

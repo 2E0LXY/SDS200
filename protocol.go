@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 type CommandResult struct {
@@ -402,30 +401,22 @@ func intPtr(s string) *int {
 }
 
 func decodeSTSDisplayText(s string) string {
-	// SDS display streams contain scanner-font glyph bytes which are not UTF-8.
-	// Preserve ordinary printable text and fixed-width leading spaces, remove only
-	// non-display control/font bytes, and never invent icon names.
+	// SDS display streams use a single-byte scanner font: 0x20-0x7E are ASCII,
+	// everything else is an icon/glyph (signal, battery, large digits). Some
+	// glyph pairs happen to form valid UTF-8 sequences, so never UTF-8 decode;
+	// keep printable ASCII only and turn the protocol's tab (escaped comma)
+	// back into a comma. Glyphs become spaces to preserve column alignment.
 	var b strings.Builder
-	raw := []byte(s)
-	for len(raw) > 0 {
-		if raw[0] == '\t' {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\t':
 			b.WriteByte(',')
-			raw = raw[1:]
-			continue
+		case c >= 0x20 && c <= 0x7e:
+			b.WriteByte(c)
+		default:
+			b.WriteByte(' ')
 		}
-		if raw[0] >= 0x20 && raw[0] <= 0x7e {
-			b.WriteByte(raw[0])
-			raw = raw[1:]
-			continue
-		}
-		r, n := utf8.DecodeRune(raw)
-		if r != utf8.RuneError && n > 1 && r >= ' ' {
-			b.WriteRune(r)
-		}
-		if n <= 0 {
-			n = 1
-		}
-		raw = raw[n:]
 	}
 	return strings.TrimRight(b.String(), " ")
 }

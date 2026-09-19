@@ -460,6 +460,11 @@ func (h *AudioHub) Acquire(owner string) (map[string]any, error) {
 	}
 	expectedIP := net.ParseIP(tr.Source)
 	exp := &net.UDPAddr{IP: expectedIP, Port: tr.ServerPort}
+	// Open the host firewall's stateful UDP path (Windows Defender Firewall,
+	// nftables conntrack) by sending from the RTP port to the scanner's RTP
+	// source port. Without this the unsolicited RTP stream is silently dropped
+	// unless an inbound allow rule exists for the executable.
+	punchRTP(rtp, exp, h.app.log)
 	h.mu.Lock()
 	h.expectedSource = exp
 	h.serverPort = tr.ServerPort
@@ -485,6 +490,19 @@ func (h *AudioHub) Acquire(owner string) (map[string]any, error) {
 		h.mu.Unlock()
 		return d, nil
 	}
+}
+
+// punchRTP sends a 4-byte non-RTP datagram (the same NAT/firewall keepalive
+// pattern used by live555/VLC) to the scanner's RTP source port.
+func punchRTP(conn *net.UDPConn, to *net.UDPAddr, log *AppLogger) {
+	if conn == nil || to == nil || to.Port == 0 {
+		return
+	}
+	if _, err := conn.WriteToUDP([]byte{0xce, 0xfa, 0xed, 0xfe}, to); err != nil {
+		log.Warn("RTP", "Firewall punch send failed", map[string]any{"to": to.String(), "error": err.Error()})
+		return
+	}
+	log.Debug("RTP", "Firewall punch sent", map[string]any{"to": to.String()})
 }
 func rtspErrorStage(err error) string {
 	s := err.Error()
@@ -573,6 +591,7 @@ func (h *AudioHub) run() {
 		case <-stop:
 			return
 		case <-keep.C:
+			punchRTP(rtp, expected, h.app.log)
 			if client != nil {
 				if err := client.GetParameter(); err != nil {
 					h.app.log.Error("RTSP", "GET_PARAMETER keepalive failed", map[string]any{"error": err.Error()})

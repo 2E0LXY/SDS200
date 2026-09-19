@@ -48,10 +48,10 @@ function render(s){
   if(Number.isInteger(s.squelch)){ $('#squelch').value=s.squelch;text('#squelchOut',s.squelch);$('#dashSquelch').value=s.squelch;text('#dashSquelchOut',s.squelch)}
   text('#recording',s.recording);text('#model',s.model);text('#firmware',s.firmware);text('#latency',s.latency_ms?`${s.latency_ms} ms`:'—');text('#scannerHost',`${config.host||''}:${config.udp_port||''}`);
   text('#dashOnline',s.online?'CONNECTED':'OFFLINE');$('#dashOnline').style.color=s.online?'#61f298':'#ff8794';
-  text('#dashChannel',s.channel||s.mode||'Waiting for scanner');text('#dashSystem',s.system||s.mode);text('#dashSystem2',s.system);text('#dashDepartment',s.department);text('#dashSite',s.site);text('#dashFrequency',formatDisplayFrequency(s.frequency));text('#dashTgid',s.tgid);text('#dashUnitId',s.unit_id);text('#dashModulation',s.modulation||s.p25_status);text('#dashService',s.service_type);text('#dashScanMode',s.mode||'—');text('#dashHoldState',`Channel: ${held(s.channel_hold)?'HOLD':'SCAN'}`);
+  const dashTitle=s.channel||(s.frequency?formatDisplayFrequency(s.frequency):'')||s.mode||'Waiting for scanner';const dashSub=[s.system,s.department,s.site].filter(Boolean).join(' › ')||(dashTitle===s.mode?'':s.mode);text('#dashChannel',dashTitle);text('#dashSystem',dashSub,'');text('#dashSystem2',s.system);text('#dashDepartment',s.department);text('#dashSite',s.site);text('#dashFrequency',formatDisplayFrequency(s.frequency));text('#dashTgid',s.tgid);text('#dashUnitId',s.unit_id);text('#dashModulation',s.modulation||s.p25_status);text('#dashService',s.service_type);text('#dashScanMode',s.mode||'—');text('#dashHoldState',`Channel: ${held(s.channel_hold)?'HOLD':'SCAN'}`);
   text('#dashScannerRecording',s.recording||'—');text('#dashModel',s.model||'SDS200');text('#dashFirmware',s.firmware);text('#dashHost',config.host?`${config.host}:${config.udp_port||50536}`:'No scanner selected');text('#dashLatency',s.latency_ms?`${s.latency_ms} ms`:'—');
 }
-function formatDisplayFrequency(v){if(v===null||v===undefined||v==='')return '—';const s=String(v);if(s.includes('.'))return `${s} MHz`;const n=Number(s);if(!Number.isFinite(n))return s;return n>=250000&&n<=13000000?`${(n/10000).toFixed(4)} MHz`:s}
+function formatDisplayFrequency(v){if(v===null||v===undefined||v==='')return '—';const s=String(v).trim().replace(/\s*MHz$/i,'');if(s.includes('.')){const f=Number(s);return Number.isFinite(f)?`${f.toFixed(4)} MHz`:`${s} MHz`}const n=Number(s);if(!Number.isFinite(n))return s;return n>=250000&&n<=13000000?`${(n/10000).toFixed(4)} MHz`:s}
 async function refresh(force=false){try{render(await api('/api/state'+(force?'?force=1':'')))}catch(e){render({online:false,error:e.message})}}
 async function control(path,body={}){if(!lease){await acquire();if(!lease)throw new Error('Another operator currently has scanner control')}return api(path,{method:'POST',headers:headers(true),body:JSON.stringify(body)})}
 
@@ -231,3 +231,15 @@ $('#copyDiagnostics').onclick=async()=>{try{const d=await api('/api/diagnostics/
 $('#clearLog').onclick=()=>{if($('#log'))$('#log').textContent=''};
 
 (async()=>{try{config=await api('/api/config');capabilities=await api('/api/capabilities');if($('#logLevel'))$('#logLevel').value=config.log_level||'INFO';text('#scannerHost',config.host?`${config.host}:${config.udp_port}`:'Not selected');text('#appVersion',`Web ${config.version}`);if(config.host)log(`Configured scanner target ${config.host}:${config.udp_port}`);else log('No saved scanner target; automatic discovery starting');if(config.real_radio_only)log('REAL RADIO ONLY build — no simulation data or fallback');await discoveryStatus();config=await api('/api/config');if(config.host)await acquire();await refresh();await Promise.all([loadFqk(),loadFavorites(),memoryHome(),readWfStatus(),audioStatus(),diagnostics(),remoteRecordState(),readDisplay(),refreshPersistentLog()]);renderFqk();renderDashFqk();setInterval(refresh,1500);setInterval(remoteRecordState,2000);setInterval(diagnostics,7000);setInterval(audioStatus,3000)}catch(e){log(e.message)}})();
+
+// ---- Service types (SVC) ----
+let svcItems=[];
+async function loadSvc(){try{const d=await api('/api/service-types');svcItems=d.items;renderSvc()}catch(e){$('#svcGrid').innerHTML='';const n=document.createElement('span');n.className='notice';n.textContent=`SVC read failed: ${e.message}`;$('#svcGrid').append(n)}}
+function renderSvc(){const g=$('#svcGrid');g.innerHTML='';svcItems.filter(i=>i.name).forEach(i=>{const b=document.createElement('button');b.textContent=i.name;b.className=i.enabled?'on':'off';b.title=i.enabled?'Scanning — tap to disable':'Not scanned — tap to enable';b.onclick=()=>toggleSvc(i.slot);g.append(b)})}
+async function toggleSvc(slot){const states=svcItems.map(i=>i.enabled?1:0);states[slot]=states[slot]?0:1;try{await control('/api/service-types',{states});log(`Service type ${svcItems[slot].name} ${states[slot]?'enabled':'disabled'}`,'INFO','CONTROL')}catch(e){log(`Service type write: ${e.message}`,'WARN','CONTROL')}await loadSvc()}
+if($('#refreshSvc'))$('#refreshSvc').onclick=loadSvc;
+// ---- Clock (DTM) ----
+async function readClock(){try{const d=await api('/api/clock');const off=Math.abs(d.offset_s)<60?'in sync':`${d.offset_s>0?'+':''}${Math.round(d.offset_s/60)} min vs this computer`;text('#clockState',`Scanner ${d.scanner_time} (${off})${d.rtc_ok?'':' — RTC not OK'}`)}catch(e){text('#clockState',`DTM read failed: ${e.message}`)}}
+if($('#readClock'))$('#readClock').onclick=readClock;
+if($('#syncClock'))$('#syncClock').onclick=async()=>{try{await control('/api/clock',{});log('Scanner clock synchronised','INFO','CONTROL')}catch(e){log(`Clock sync: ${e.message}`,'WARN','CONTROL')}readClock()};
+setTimeout(()=>{loadSvc();readClock()},1500);

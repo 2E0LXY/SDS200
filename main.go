@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -12,15 +13,18 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
-const appVersion = "0.7.1-native"
+// appVersion is overridden at build time with -ldflags "-X main.appVersion=<tag>".
+var appVersion = "0.8.0-dev"
 
 //go:embed static/*
 var staticFS embed.FS
@@ -40,7 +44,18 @@ type Config struct {
 func defaultConfig() Config {
 	return Config{UDPPort: 50536, HTTPPort: 8765, RTSPPort: 554, RTSPPath: "/au:scanner.au", LeaseTTL: 60, StateCacheMS: 800, LogLevel: "INFO"}
 }
+
+// dataDirOverride is set by -data-dir or SDS200_DATA_DIR (used by the Linux
+// systemd service, which runs with a fixed state directory).
+var dataDirOverride string
+
 func appDataDir() string {
+	if dataDirOverride != "" {
+		return dataDirOverride
+	}
+	if v := os.Getenv("SDS200_DATA_DIR"); v != "" {
+		return v
+	}
 	if v := os.Getenv("LOCALAPPDATA"); v != "" {
 		return filepath.Join(v, "SDS200-WebApp")
 	}
@@ -150,7 +165,10 @@ func (a *App) Close() {
 	if a.audio != nil {
 		a.audio.ForceStop("application shutdown")
 	}
-	if a.waterfall != nil {
+	// Only restore scan mode if this app put the scanner into waterfall mode;
+	// otherwise shutting down would yank the radio out of whatever mode the
+	// operator chose (Close Call, search, menu...).
+	if a.waterfall != nil && a.waterfall.Running() {
 		a.waterfall.Stop()
 	}
 	a.log.Info("APP", "Application shutdown", nil)
@@ -369,6 +387,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/favorites", a.apiFavorites)
 	mux.HandleFunc("/api/memory", a.apiMemory)
 	mux.HandleFunc("/api/menu", a.apiMenu)
+	mux.HandleFunc("/api/service-types", a.apiServiceTypes)
+	mux.HandleFunc("/api/clock", a.apiClock)
 	mux.HandleFunc("/api/waterfall/status", a.apiWaterfallStatus)
 	mux.HandleFunc("/api/waterfall/start", a.apiWaterfallStart)
 	mux.HandleFunc("/api/waterfall/stop", a.apiWaterfallStop)
@@ -456,29 +476,63 @@ func openBrowser(raw string) {
 }
 
 func main() {
+	noBrowser := flag.Bool("no-browser", runtime.GOOS != "windows", "do not open a browser window on start")
+	listen := flag.String("listen", "", "HTTP listen address (default 0.0.0.0:<http_port from config>)")
+	host := flag.String("scanner", "", "scanner IPv4 address (overrides saved config)")
+	flag.StringVar(&dataDirOverride, "data-dir", "", "directory for config, logs and recordings")
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println(appVersion)
+		return
+	}
 	a, err := NewApp()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	defer a.Close()
+	if *host != "" {
+		ip := netParsePrivateIPv4(*host)
+		if ip == "" {
+			fmt.Fprintln(os.Stderr, "-scanner must be a private IPv4 address")
+			os.Exit(2)
+		}
+		_ = a.setHost(ip, "")
+	}
 	cfg := a.configSnapshot()
-	srv := &http.Server{Addr: fmt.Sprintf("0.0.0.0:%d", cfg.HTTPPort), Handler: a.routes(), ReadHeaderTimeout: 5 * time.Second}
+	addr := *listen
+	if addr == "" {
+		addr = fmt.Sprintf("0.0.0.0:%d", cfg.HTTPPort)
+	}
+	srv := &http.Server{Addr: addr, Handler: a.routes(), ReadHeaderTimeout: 5 * time.Second}
 	if cfg.Host == "" {
 		go a.startDiscovery()
 	}
+	if !*noBrowser {
+		go func() {
+			time.Sleep(450 * time.Millisecond)
+			_, port, _ := strings.Cut(addr, ":")
+			openBrowser(fmt.Sprintf("http://127.0.0.1:%s", port))
+		}()
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		time.Sleep(450 * time.Millisecond)
-		openBrowser(fmt.Sprintf("http://127.0.0.1:%d", cfg.HTTPPort))
+		<-sig
+		a.log.Info("APP", "Shutdown signal received", nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
 	}()
 	a.log.Info("HTTP", "Web server listening", map[string]any{"address": srv.Addr})
 	err = srv.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		a.log.Error("HTTP", "server failed", map[string]any{"error": err.Error()})
 		fmt.Fprintln(os.Stderr, err)
+		a.Close()
 		os.Exit(1)
 	}
-	_ = srv.Shutdown(context.Background())
 }
 
 // Keep url imported in the binary for future URI validation and avoid accidental

@@ -4,3 +4,5 @@
 SDS200-WebApp
 /dist/
 .DS_Store
+.work/
+dist/
