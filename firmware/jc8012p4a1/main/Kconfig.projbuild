@@ -1,0 +1,72 @@
+menu "SDS200 Panel"
+
+    choice SDS_PANEL_REV
+        prompt "Default LCD panel revision"
+        default SDS_PANEL_REV_V2
+        help
+            The JC8012P4A1 shipped with two different JD9365 panels. Boards from
+            batch 2627 and earlier use the original panel; batch 2628 and later
+            use the "V2" panel with a different initialisation sequence. The
+            revision can also be changed at runtime from the Settings screen
+            (stored in NVS, applied on reboot).
+
+        config SDS_PANEL_REV_V1
+            bool "Original panel (batch <= 2627)"
+        config SDS_PANEL_REV_V2
+            bool "V2 panel (batch >= 2628)"
+    endchoice
+
+    config SDS_PANEL_REV_DEFAULT
+        int
+        default 1 if SDS_PANEL_REV_V1
+        default 2
+
+    choice SDS_ROTATION
+        prompt "Default landscape rotation"
+        default SDS_ROTATION_90
+        help
+            The panel is natively 800x1280 portrait. The UI is rendered in
+            landscape and rotated by the PPA. "Flip 180" in Settings toggles
+            between the two options at runtime.
+
+        config SDS_ROTATION_90
+            bool "90 degrees"
+        config SDS_ROTATION_270
+            bool "270 degrees"
+    endchoice
+
+    config SDS_TOUCH_SWAP_XY
+        bool "Touch: swap X/Y in native (portrait) orientation"
+        default n
+    config SDS_TOUCH_MIRROR_X
+        bool "Touch: mirror X in native (portrait) orientation"
+        default n
+    config SDS_TOUCH_MIRROR_Y
+        bool "Touch: mirror Y in native (portrait) orientation"
+        default y
+        help
+            Guition's reference code uses mirror_y for the GSL3680 in portrait.
+            LVGL then applies the display rotation to touch points itself.
+
+    config SDS_DEFAULT_WIFI_SSID
+        string "Default Wi-Fi SSID (optional)"
+        default ""
+        help
+            Used only when no credentials have been saved in NVS.
+
+    config SDS_DEFAULT_WIFI_PASSWORD
+        string "Default Wi-Fi password (optional)"
+        default ""
+
+    config SDS_DEFAULT_SCANNER_IP
+        string "Default scanner IP address (optional)"
+        default ""
+
+    config SDS_WEB_SERVER
+        bool "Enable HTTP API on port 80"
+        default y
+        help
+            GET /api/state and POST /api/control/key. No authentication: only
+            enable on a trusted network.
+
+endmenu
