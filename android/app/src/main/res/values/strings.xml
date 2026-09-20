@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SDS200 Remote</string>
+    <string name="notification_channel">Live audio</string>
+    <string name="notification_channel_desc">Shown while listening to the scanner\'s live audio</string>
+    <string name="notification_live_audio">Scanner live audio</string>
+    <string name="stop">Stop</string>
+</resources>

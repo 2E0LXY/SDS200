@@ -532,21 +532,10 @@ func parseWaterfallLine(raw string) map[string]any {
 		if v == "" {
 			return nil
 		}
-		var n float64
-		var err error
-		if strings.IndexAny(v, "abcdefABCDEF") >= 0 {
-			var x uint64
-			x, err = strconv.ParseUint(v, 16, 64)
-			n = float64(x)
-		} else {
-			n, err = strconv.ParseFloat(v, 64)
-			if err != nil {
-				if x, e := strconv.ParseUint(v, 16, 64); e == nil {
-					n = float64(x)
-					err = nil
-				}
-			}
-		}
+		// GWF payloads are fixed two-digit hexadecimal bytes (e.g. "1a", "2f",
+		// "10"); never interpret digit-only values as decimal.
+		x, err := strconv.ParseUint(v, 16, 8)
+		n := float64(x)
 		if err != nil {
 			return nil
 		}

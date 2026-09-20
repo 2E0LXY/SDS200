@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Scanner body with antenna and display, inside the 72dp adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="@color/launcher_foreground"
+        android:pathData="M64,22 L68,22 L68,42 L64,42 Z" />
+    <path android:fillColor="@color/launcher_foreground"
+        android:pathData="M30,42 L78,42 Q82,42 82,46 L82,80 Q82,84 78,84 L30,84 Q26,84 26,80 L26,46 Q26,42 30,42 Z" />
+    <path android:fillColor="#FF1A1C1E"
+        android:pathData="M32,48 L76,48 L76,62 L32,62 Z" />
+    <path android:fillColor="#FF1A1C1E"
+        android:pathData="M34,68 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 M48,68 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 M62,68 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 M74,74 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+</vector>
