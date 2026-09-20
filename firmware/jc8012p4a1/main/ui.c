@@ -174,10 +174,23 @@ static void nav_cb(lv_event_t *e)
     show_page((int)(intptr_t)lv_event_get_user_data(e));
 }
 
+/* Pseudo key codes carried in button user data (not sent as KEY codes). */
+#define KEY_NEXT  0x101   /* NXT with current index, rotary fallback */
+#define KEY_PREV  0x102   /* PRV with current index, rotary fallback */
+#define KEY_FUNC  0x200   /* OR'd with a key: FUNC + key */
+
 static void key_cb(lv_event_t *e)
 {
-    char code = (char)(intptr_t)lv_event_get_user_data(e);
-    if (!scanner_key(code)) {
+    int v = (int)(intptr_t)lv_event_get_user_data(e);
+    bool ok;
+    if (v == KEY_NEXT || v == KEY_PREV) {
+        ok = scanner_step(v == KEY_NEXT ? 1 : -1);
+    } else if (v & KEY_FUNC) {
+        ok = scanner_func((char)(v & 0xff));
+    } else {
+        ok = scanner_key((char)v);
+    }
+    if (!ok) {
         flash_msg("Key queue full");
     }
 }
@@ -287,9 +300,9 @@ static void build_live(lv_obj_t *pg)
     lv_obj_add_event_cb(s_sql_slider, sql_cb, LV_EVENT_RELEASED, NULL);
 
     /* action row */
-    static const struct { const char *label; char code; uint32_t col; } acts[] = {
+    static const struct { const char *label; int code; uint32_t col; } acts[] = {
         {"Sys Hold", 'A', COL_PANEL2}, {"Dept Hold", 'B', COL_PANEL2}, {"Hold", 'C', COL_WARN},
-        {"Avoid", 'L', COL_BAD}, {LV_SYMBOL_LEFT " Prev", '<', COL_PANEL2}, {"Next " LV_SYMBOL_RIGHT, '>', COL_PANEL2},
+        {"Avoid", 'L', COL_BAD}, {LV_SYMBOL_LEFT " Prev", KEY_PREV, COL_PANEL2}, {"Next " LV_SYMBOL_RIGHT, KEY_NEXT, COL_PANEL2},
     };
     int bw = (CONTENT_W - 16 - 5 * 12) / 6;
     for (int i = 0; i < 6; i++) {
@@ -447,11 +460,13 @@ static void build_remote(lv_obj_t *pg)
     lv_obj_center(s_mirror_note);
 
     /* function keys below the mirror */
-    static const struct { const char *label; char code; uint32_t col; } fk[] = {
+    /* SDS200 has no Service/Range/SQL-push key codes: Service Types = FUNC+Z,
+     * squelch-knob push = MENU (verified on fw 1.23.15). */
+    static const struct { const char *label; int code; uint32_t col; } fk[] = {
         {"MENU", 'M', COL_PANEL2}, {"FUNC", 'F', COL_ACCENT}, {"REPLAY", 'Y', COL_PANEL2},
-        {"AVOID", 'L', COL_BAD}, {"SERVICE", 'T', COL_PANEL2}, {"RANGE", 'R', COL_PANEL2},
+        {"AVOID", 'L', COL_BAD}, {"SERVICE", KEY_FUNC | 'Z', COL_PANEL2}, {"ATT", KEY_FUNC | '4', COL_PANEL2},
         {"A", 'A', COL_PANEL2}, {"B", 'B', COL_PANEL2}, {"C", 'C', COL_PANEL2},
-        {"ZIP", 'Z', COL_PANEL2}, {"VOL push", 'V', COL_PANEL2}, {"SQL push", 'Q', COL_PANEL2},
+        {"ZIP", 'Z', COL_PANEL2}, {"VOL push", 'V', COL_PANEL2}, {"SQL/MENU", 'M', COL_PANEL2},
         {LV_SYMBOL_LEFT " L", '<', COL_PANEL2}, {"PUSH", '^', COL_PANEL2}, {"R " LV_SYMBOL_RIGHT, '>', COL_PANEL2},
     };
     int bw = (MIRROR_W + 28 - 4 * 10) / 5;

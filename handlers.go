@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-var keyCodes = map[string]string{"M": "Menu", "F": "Function", "L": "Avoid", "0": "0", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", ".": "No / Decimal", "E": "Enter / Yes", ">": "Rotary right", "<": "Rotary left", "^": "Rotary push", "V": "Volume knob push", "Q": "Squelch knob push", "Y": "Replay", "A": "Soft 1 / System", "B": "Soft 2 / Department", "C": "Soft 3 / Channel", "Z": "Zip", "T": "Service Type", "R": "Range"}
+var keyCodes = map[string]string{"M": "Menu", "F": "Function", "L": "Avoid", "0": "0", "1": "1", "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "9": "9", ".": "No / Decimal", "E": "Enter / Yes", ">": "Rotary right", "<": "Rotary left", "^": "Rotary push", "V": "Volume knob push (backlight)", "Y": "Replay", "A": "Soft 1 / System", "B": "Soft 2 / Department", "C": "Soft 3 / Channel", "Z": "Zip / Location"}
 var navTargets = map[string]bool{"SYS": true, "DEPT": true, "SITE": true, "CFREQ": true, "TGID": true, "STGID": true, "WX": true, "FTO": true, "CCHIT": true, "CS_FREQ": true, "QS_FREQ": true}
 
 func (a *App) apiConfig(w http.ResponseWriter, r *http.Request) {
@@ -293,8 +293,8 @@ func (a *App) apiHold(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, err)
 		return
 	}
-	seq := map[string][]string{"system": {"A"}, "department": {"B"}, "site": {"F", "B"}, "channel": {"C"}}[scope]
-	if len(seq) == 0 {
+	keys := map[string][]string{"system": {"A"}, "department": {"B"}, "site": {"F", "B"}, "channel": {"C"}}[scope]
+	if len(keys) == 0 {
 		errJSON(w, &httpError{404, "unknown hold scope"})
 		return
 	}
@@ -305,23 +305,229 @@ func (a *App) apiHold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.log.Info("CONTROL", "Hold change requested", map[string]any{"scope": scope, "enabled": b.Enabled})
-	for _, k := range seq {
-		if _, err := a.execWrite("KEY,"+k+",P", 1250*time.Millisecond); err != nil {
+	// Prefer the documented HLD command (toggles the addressed item and does
+	// not depend on soft-key labels or FUNC state); fall back to keys.
+	wire := holdWire(scope, before)
+	if wire != "" {
+		if _, err := a.execWrite(wire, 1250*time.Millisecond); err != nil {
 			errJSON(w, err)
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
+	} else {
+		if err := a.pressKeys(keys); err != nil {
+			errJSON(w, err)
+			return
+		}
 	}
-	a.invalidateState()
-	time.Sleep(120 * time.Millisecond)
-	after := a.readState(true)
-	v := heldValue(after[scope+"_hold"])
-	if v == nil || *v != b.Enabled {
-		a.log.Warn("CONTROL", "Hold not confirmed", map[string]any{"scope": scope, "requested": b.Enabled, "reported": after[scope+"_hold"]})
-		errJSON(w, &httpError{409, "scanner did not confirm hold state"})
+	// Hold state is not reflected in GSI immediately: channel ~0.2-0.4 s,
+	// system/department up to ~2.4 s (measured on SDS200E fw 1.23.15).
+	deadline := time.Now().Add(3500 * time.Millisecond)
+	var after map[string]any
+	for {
+		time.Sleep(200 * time.Millisecond)
+		a.invalidateState()
+		after = a.readState(true)
+		if v := heldValue(after[scope+"_hold"]); v != nil && *v == b.Enabled {
+			writeJSON(w, 200, map[string]any{"scope": scope, "enabled": b.Enabled, "changed": true, "confirmed": true, "command": wire})
+			return
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+	}
+	a.log.Warn("CONTROL", "Hold not confirmed", map[string]any{"scope": scope, "requested": b.Enabled, "reported": after[scope+"_hold"], "command": wire})
+	errJSON(w, &httpError{409, "scanner did not confirm hold state"})
+}
+
+// holdWire builds HLD,<tkw>,<i1>,<i2> from current GSI indexes (spec v2.00 p.13).
+func holdWire(scope string, st map[string]any) string {
+	idx := func(k string) string {
+		if v, ok := st[k].(*int); ok && v != nil {
+			return strconv.Itoa(*v)
+		}
+		return ""
+	}
+	switch scope {
+	case "system":
+		if i := idx("system_index"); i != "" {
+			return "HLD,SYS," + i + ","
+		}
+	case "department":
+		if i := idx("department_index"); i != "" {
+			return "HLD,DEPT," + i + "," + idx("system_index")
+		}
+	case "site":
+		if i := idx("site_index"); i != "" {
+			return "HLD,SITE," + i + ","
+		}
+	case "channel":
+		t := map[string]string{"ConvFrequency": "CFREQ", "TGID": "TGID", "CcHitsChannel": "CCHIT", "WxChannel": "WX", "ToneOutChannel": "FTO"}[fmt.Sprint(st["channel_kind"])]
+		if i := idx("channel_index"); i != "" && t != "" {
+			return "HLD," + t + "," + i + ","
+		}
+	}
+	return ""
+}
+
+// pressKeys sends KEY,<k>,P for each key with a short gap.
+func (a *App) pressKeys(keys []string) error {
+	for _, k := range keys {
+		if _, err := a.execWrite("KEY,"+k+",P", 1250*time.Millisecond); err != nil {
+			return err
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return nil
+}
+
+// funcActive reports whether the scanner's FUNC (F) modifier is currently on.
+func (a *App) funcActive() (bool, error) {
+	res, err := a.command("GSI", 2500*time.Millisecond)
+	if err != nil {
+		return false, err
+	}
+	info := parseScannerInfo(res.Raw)
+	for _, p := range info.Elements["Property"] {
+		return strings.EqualFold(p["F"], "On"), nil
+	}
+	return false, nil
+}
+
+// apiFunc performs FUNC+<key> reliably: waits for any transient popup to clear
+// (a key press while a popup is shown only dismisses it), presses F only if
+// FUNC is not already active, then the key, then confirms via STS.
+func (a *App) apiFunc(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, "POST") {
 		return
 	}
-	writeJSON(w, 200, map[string]any{"scope": scope, "enabled": b.Enabled, "changed": true, "confirmed": true})
+	if err := a.requireControl(r); err != nil {
+		errJSON(w, err)
+		return
+	}
+	var b struct {
+		Key string `json:"key"`
+	}
+	if err := readJSON(r, &b); err != nil {
+		errJSON(w, err)
+		return
+	}
+	key := strings.TrimSpace(b.Key)
+	if key != "." {
+		key = strings.ToUpper(key)
+	}
+	if _, ok := keyCodes[key]; !ok || key == "F" {
+		errJSON(w, &httpError{422, "key code not allowed with FUNC"})
+		return
+	}
+	for i := 0; i < 15; i++ {
+		res, err := a.command("GSI", 2500*time.Millisecond)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		if !strings.Contains(res.Raw, "<PopupScreen") {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	on, err := a.funcActive()
+	if err != nil {
+		errJSON(w, err)
+		return
+	}
+	seq := []string{key}
+	if !on {
+		seq = []string{"F", key}
+	}
+	a.log.Info("CONTROL", "FUNC sequence", map[string]any{"key": key, "func_was_active": on})
+	if err := a.pressKeys(seq); err != nil {
+		errJSON(w, err)
+		return
+	}
+	d := map[string]any{"command": "KEY,F,P + KEY," + key + ",P"}
+	if sts, e := a.command("STS", 1200*time.Millisecond); e == nil {
+		d["display"] = parseSTS(sts.Raw, sts.ElapsedMS)
+	}
+	a.invalidateState()
+	writeJSON(w, 200, d)
+}
+
+// Location/range: LCR returns/sets latitude, longitude (degrees) and range (miles).
+func (a *App) apiLocation(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		res, err := a.command("LCR", 2500*time.Millisecond)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		f := packetFields(res.Raw, "LCR")
+		if len(f) < 3 {
+			errJSON(w, &httpError{502, "unexpected LCR response"})
+			return
+		}
+		lat, _ := strconv.ParseFloat(strings.TrimSpace(f[0]), 64)
+		lon, _ := strconv.ParseFloat(strings.TrimSpace(f[1]), 64)
+		rng, _ := strconv.ParseFloat(strings.TrimSpace(f[2]), 64)
+		writeJSON(w, 200, map[string]any{"latitude": lat, "longitude": lon, "range": rng, "raw": res.Raw})
+	case "POST":
+		if err := a.requireControl(r); err != nil {
+			errJSON(w, err)
+			return
+		}
+		var b struct {
+			Latitude  *float64 `json:"latitude"`
+			Longitude *float64 `json:"longitude"`
+			Range     *float64 `json:"range"`
+		}
+		if err := readJSON(r, &b); err != nil {
+			errJSON(w, err)
+			return
+		}
+		res, err := a.command("LCR", 2500*time.Millisecond)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		f := packetFields(res.Raw, "LCR")
+		if len(f) < 3 {
+			errJSON(w, &httpError{502, "unexpected LCR response"})
+			return
+		}
+		lat, lon, rng := strings.TrimSpace(f[0]), strings.TrimSpace(f[1]), strings.TrimSpace(f[2])
+		if b.Latitude != nil {
+			if *b.Latitude < -90 || *b.Latitude > 90 {
+				errJSON(w, &httpError{422, "latitude out of range"})
+				return
+			}
+			lat = strconv.FormatFloat(*b.Latitude, 'f', 6, 64)
+		}
+		if b.Longitude != nil {
+			if *b.Longitude < -180 || *b.Longitude > 180 {
+				errJSON(w, &httpError{422, "longitude out of range"})
+				return
+			}
+			lon = strconv.FormatFloat(*b.Longitude, 'f', 6, 64)
+		}
+		if b.Range != nil {
+			if *b.Range < 0 || *b.Range > 999 {
+				errJSON(w, &httpError{422, "range must be 0..999"})
+				return
+			}
+			rng = strconv.FormatFloat(*b.Range, 'f', 1, 64)
+		}
+		wire := "LCR," + lat + "," + lon + "," + rng
+		a.log.Info("CONTROL", "Location/range write", map[string]any{"command": wire})
+		d, err := a.execWrite(wire, 1500*time.Millisecond)
+		if err != nil {
+			errJSON(w, err)
+			return
+		}
+		a.invalidateState()
+		writeJSON(w, 200, d)
+	default:
+		writeJSON(w, 405, map[string]any{"detail": "method not allowed"})
+	}
 }
 func heldValue(v any) *bool {
 	s := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
@@ -373,6 +579,14 @@ func (a *App) apiNav(w http.ResponseWriter, r *http.Request) {
 	}
 	first := wireValue(b.First)
 	second := wireValue(b.Second)
+	// Fall back to the live index: NXT/PRV with a wrong index jumps to an
+	// unrelated channel rather than stepping (verified on fw 1.23.15).
+	if first == "" || first == "0" {
+		st := a.readState(false)
+		if v, ok := st["channel_index"].(*int); ok && v != nil {
+			first = strconv.Itoa(*v)
+		}
+	}
 	wire := ""
 	if cmd == "HLD" {
 		wire = fmt.Sprintf("HLD,%s,%s,%s", t, first, second)

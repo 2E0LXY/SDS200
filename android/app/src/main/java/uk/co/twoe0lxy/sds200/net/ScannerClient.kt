@@ -202,22 +202,82 @@ class ScannerClient(
         if (!Replies.isOk(r.raw, "SQL")) throw ScannerException("Squelch not accepted: ${r.raw.trim()}")
     }
 
-    /** Toggles a hold via keys and confirms it from a fresh GSI. Returns the confirmed state. */
+    /**
+     * Toggles a hold and confirms it from GSI. Uses the documented HLD command with
+     * the current indexes (independent of soft-key labels and FUNC state), falling
+     * back to keys. GSI lags the change: channel ~0.2-0.4 s, system/department up
+     * to ~2.4 s (measured on SDS200E fw 1.23.15), so poll for up to 3.5 s.
+     */
     suspend fun setHold(scope: HoldScope, enabled: Boolean): ScannerInfo {
         val before = gsi()
         if (scope.current(before) == enabled) return before
-        for (k in scope.keys) {
-            keyOnly(k)
-            delay(100)
+        val wire = holdWire(scope, before)
+        if (wire != null) {
+            val r = command(wire)
+            if (!Replies.isOk(r.raw, "HLD")) throw ScannerException("Hold not accepted: ${r.raw.trim()}")
+        } else {
+            for (k in scope.keys) {
+                keyOnly(k)
+                delay(250)
+            }
         }
-        delay(120)
-        var after = gsi()
-        if (scope.current(after) != enabled) {
-            delay(250)
+        val deadline = System.currentTimeMillis() + 3500
+        var after: ScannerInfo
+        do {
+            delay(200)
             after = gsi()
+            if (scope.current(after) == enabled) return after
+        } while (System.currentTimeMillis() < deadline)
+        throw ScannerException("Scanner did not confirm ${scope.label} hold")
+    }
+
+    private fun holdWire(scope: HoldScope, i: ScannerInfo): String? = when (scope) {
+        HoldScope.SYSTEM -> i.systemIndex?.let { "HLD,SYS,$it," }
+        HoldScope.DEPARTMENT -> i.departmentIndex?.let { "HLD,DEPT,$it,${i.systemIndex ?: ""}" }
+        HoldScope.SITE -> i.siteIndex?.let { "HLD,SITE,$it," }
+        HoldScope.CHANNEL -> {
+            val t = i.channelKind?.navTarget
+            val idx = i.channelIndex
+            if (t != null && idx != null) "HLD,$t,$idx," else null
         }
-        if (scope.current(after) != enabled) throw ScannerException("Scanner did not confirm ${scope.label} hold")
-        return after
+    }
+
+    /**
+     * FUNC + [code]: waits for any transient popup to clear (a key press during a
+     * popup only dismisses it), presses F only if FUNC is not already active, then
+     * the key. E.g. Service Types = FUNC+Z on the SDS200.
+     */
+    suspend fun func(code: Char): StsDisplay? {
+        require(code in KEY_CODES && code != 'F') { "Key code not allowed with FUNC: $code" }
+        var raw = command("GSI", 2500).raw
+        var tries = 0
+        while (raw.contains("<PopupScreen") && tries++ < 15) {
+            delay(200)
+            raw = command("GSI", 2500).raw
+        }
+        if (!Regex(""" F="On"""").containsMatchIn(raw)) {
+            keyOnly('F')
+            delay(250)
+        }
+        return key(code)
+    }
+
+    data class Location(val latitude: Double, val longitude: Double, val rangeMiles: Double)
+
+    /** LCR -> latitude, longitude (degrees), range (miles). */
+    suspend fun location(): Location {
+        val f = Replies.fields(command("LCR").raw, "LCR")
+        if (f == null || f.size < 3) throw ScannerException("Unexpected LCR reply")
+        return Location(f[0].trim().toDouble(), f[1].trim().toDouble(), f[2].trim().toDouble())
+    }
+
+    /** Sets the scan range (miles) keeping the current location. The SDS200 has no Range key. */
+    suspend fun setRange(miles: Double) {
+        require(miles in 0.0..999.0) { "Range must be 0-999 miles" }
+        val cur = Replies.fields(command("LCR").raw, "LCR")
+        if (cur == null || cur.size < 3) throw ScannerException("Unexpected LCR reply")
+        val r = command("LCR,${cur[0].trim()},${cur[1].trim()},${"%.1f".format(java.util.Locale.ROOT, miles)}", 1500)
+        if (!Replies.isOk(r.raw, "LCR")) throw ScannerException("Range not accepted: ${r.raw.trim()}")
     }
 
     /** Next/previous channel via NXT/PRV with the target keyword from the channel kind; rotary fallback. */
@@ -285,7 +345,9 @@ class ScannerClient(
         const val DEFAULT_TIMEOUT_MS = 1200
         val KEY_CODES = setOf(
             'M', 'F', 'L', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', 'E',
-            '>', '<', '^', 'V', 'Q', 'Y', 'A', 'B', 'C', 'Z', 'T', 'R',
+            // T, R and Q are not SDS200 keys (verified: the radio treats them as digit
+            // entry). Service Types = FUNC+Z; squelch-knob push = MENU.
+            '>', '<', '^', 'V', 'Y', 'A', 'B', 'C', 'Z',
         )
 
         fun isNavigable(kind: ChannelKind?) = kind?.navTarget != null

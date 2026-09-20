@@ -1,38 +1,74 @@
-SDS200 WebApp v0.7.1-native - important control mapping
+SDS200 WebApp / Android / ESP32 panel - control map
+===================================================
+Verified against a physical SDS200E, firmware 1.23.15 (2026-09-20).
 
-Front-panel remote keys
-  M  Menu / Back
-  F  Function
-  L  Avoid
-  .  Decimal / No
-  E  Enter / Yes
-  <  Rotary left
-  >  Rotary right
-  ^  Rotary push
-  V  Volume/light knob push
-  Q  Squelch/menu knob push
+KEY codes accepted (KEY,<code>,P)
+---------------------------------
+  M  Menu / Back (also the squelch-knob push on the SDS200)
+  F  Function (same effect as the scroll-knob push)
+  ^  Scroll-knob push (Function in scan mode, Select in menus)
+  <  Scroll left     >  Scroll right
+  A  Soft key 1 (System hold)   B  Soft key 2 (Dept hold)   C  Soft key 3 (Channel hold)
+  L  Avoid (1st press temporary, 2nd press permanent)
   Y  Replay
-  A  Soft key 1
-  B  Soft key 2
-  C  Soft key 3
+  V  Volume-knob push (backlight)
   Z  Zip / Location
-  T  Service Types
-  R  Range
-  0-9 numeric keypad
+  E  Enter / Yes    .  Decimal / No    0-9 keypad
 
-Volume: 0-29
-Squelch: 0-19
-Favorites Quick Keys: 00-99
+NOT SDS200 key codes - removed from all three clients
+-----------------------------------------------------
+  T (Service Type), R (Range), Q (Squelch push)
+The SDS200E acknowledges them with KEY,OK but treats them as digit entry and
+opens "Quick Key Navigation", which is why those buttons appeared dead.
+  Service Types  -> FUNC + Z
+  Squelch push   -> M
+  Range          -> no key; use the LCR command (see below)
 
-Control confirmation
-  Every web key press sends the documented KEY,<code>,P command, then performs a fresh STS read and returns/renders the scanner display as confirmation.
+FUNC + key (sent as KEY,F,P then KEY,<key>,P)
+---------------------------------------------
+  F+Z Service Types      F+1..3 Search keys 1-3     F+4 Channel attenuator
+  F+5 Dimmer             F+6 Weather priority       F+7 IF exchange
+  F+8 Repeater reverse   F+9 Simple/detail display  F+0 Channel volume offset
+  F+. Priority           F+E Quick Search / ID Search toggle
+  F+B Site hold          F+A/F+B/F+C waterfall step / max hold / marker-to-centre
+Clients press F only when GSI reports Property F="Off", and wait for any
+PopupScreen to clear first: a key press while a popup is shown only dismisses
+the popup, which silently ate the second key of a FUNC pair.
 
-Audio
-  No background port-554 probe.
-  Listen Live owns RTSP startup: TCP connect -> OPTIONS -> DESCRIBE -> SETUP -> PLAY.
-  GET_PARAMETER keeps the same session alive.
-  Final audio owner release sends TEARDOWN before close.
-  Browser WAV source is exposed only after real RTP is received.
+Holds
+-----
+Sent as HLD,<tkw>,<index1>,<index2> using the live GSI indexes:
+  HLD,SYS,<sys>,            HLD,DEPT,<dept>,<sys>
+  HLD,SITE,<site>,          HLD,CFREQ|TGID|CCHIT|FTO|WX,<chan>,
+HLD toggles. Key fallback: A / B / F+B / C.
+GSI lags a hold change: channel 0.2-0.4 s, system/department up to 2.4 s, so
+clients poll for up to 3.5 s before reporting failure.
 
-Logging components
-  APP HTTP UDP CONTROL STS DISCOVERY LEASE AUDIO RTSP RTP WATERFALL RECORD BROWSER
+Previous / Next
+---------------
+NXT|PRV,<tkw>,<current index>,,1 - the index must be the live one; a stale or
+zero index jumps to an unrelated channel. In search / Close Call modes there is
+no channel index, so the clients fall back to the rotary keys < and >.
+
+Other direct commands used
+--------------------------
+  VOL / VOL,0-29            SQL / SQL,0-19
+  FQK / FQK,<100 states>    Favourites quick keys 00-99 (0 none, 1 off, 2 on)
+  SVC / SVC,<47 states>     37 preset + 10 custom service types
+  DTM / DTM,0,Y,M,D,h,m,s   Clock read / sync
+  LCR / LCR,<lat>,<lon>,<range miles>   Location and scan range
+  GLT,FL|SYS|DEPT|SITE|CFREQ|TGID       Memory browser
+  AST / APR                 Analyse start / pause
+  URC,0|1                   Scanner SD recording
+  JPM,WF_MODE / JPM,SCN_MODE, GWF,1,ON/OFF, PWF,1,OFF   Waterfall
+  GWF values are two-digit hex (0x00-0xff), always - never decimal.
+  KAL (keep alive) is not supported on 1.23.15: it answers ERR.
+
+Not represented as LAN controls
+-------------------------------
+  Physical power on/off, USB mass storage, Sentinel firmware/database updates,
+  microSD handling, and the 3-second hold functions (global attenuator, weather
+  mode, colour mode): KEY modes L, H and R behave exactly like P on this
+  firmware, so a long press cannot be sent over the network.
+
+No simulation or synthetic scanner telemetry is used.

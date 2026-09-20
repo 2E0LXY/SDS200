@@ -65,7 +65,7 @@
             <button data-key="7">7</button><button data-key="8">8</button><button data-key="9">9</button>
             <button data-key="E">YES</button><button data-key="0">0</button><button data-key=".">. / NO</button>
           </div>
-          <div class="dash-functions"><button data-key="M">MENU</button><button data-key="F" class="amber">FUNC</button><button data-key="Y">REPLAY</button><button data-key="L" class="red">AVOID</button><button data-key="T">SERVICE</button><button data-key="R">RANGE</button></div>
+          <div class="dash-functions"><button data-key="M">MENU</button><button data-key="F" class="amber">FUNC</button><button data-key="Y">REPLAY</button><button data-key="L" class="red">AVOID</button><button data-func="Z">SERVICE</button><button data-range>RANGE</button></div>
         </div>
         <div class="dash-softkeys"><button id="dashSoftA" data-key="A">SYSTEM</button><button id="dashSoftB" data-key="B">DEPT</button><button id="dashSoftC" data-key="C">CHANNEL</button></div>
       </article>
@@ -74,7 +74,7 @@
         <div class="dash-head"><div><span class="dash-index">3</span><h2>Lists & Quick Keys</h2></div><button class="dash-open" data-goto="4">OPEN</button></div>
         <div class="dash-subhead">Favorites Quick Keys 00–19</div>
         <div id="dashFqkGrid" class="dash-fqk"></div>
-        <div class="dash-service-row"><button data-key="T">Service Types</button><button data-goto="3">Memory</button><button data-goto="4">Scan Setup</button></div>
+        <div class="dash-service-row"><button data-func="Z">Service Types</button><button data-goto="3">Memory</button><button data-goto="4">Scan Setup</button></div>
         <div class="dash-subhead">Active Monitor Lists</div>
         <div id="dashFavorites" class="dash-monitor"><div class="empty">Loading lists…</div></div>
       </article>
@@ -153,8 +153,8 @@
       <div class="function-grid card">
         <button data-key="M">MENU / BACK</button><button data-key="F" class="amber">FUNC</button>
         <button data-key="Y">REPLAY</button><button data-key="L" class="red">AVOID</button>
-        <button data-key="T">SERVICE TYPES</button><button data-key="R">RANGE</button>
-        <button data-key="V">VOL / LIGHT PUSH</button><button data-key="Q">SQL / MENU PUSH</button>
+        <button data-func="Z">SERVICE TYPES</button><button data-range>RANGE</button>
+        <button data-key="V">VOL / LIGHT PUSH</button><button data-key="M">SQL / MENU PUSH</button>
         <button data-key="Z">ZIP / LOCATION</button>
       </div>
     </div>
@@ -181,10 +181,10 @@
     </div>
     <div class="card"><div class="card-head"><div><h2>Lists to Monitor</h2><p>Favorites / Full Database / Search with Scan reported by the scanner.</p></div><button id="refreshFavorites">Refresh</button></div><div id="favoritesList" class="list-rows"><div class="empty">No list data yet.</div></div></div>
     <div class="grid two">
-      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Service Types</h2><p>Open the scanner Service Types selection and enable only the services that are actually present.</p></div><button data-key="T">Open Service Types</button></div>
-      <div class="card function-card"><div><span class="cap direct">DIRECT</span><h2>Location & Range</h2><p>Use ZIP/location and Range controls. Region-dependent options are taken from the connected scanner, not hard-coded from the US manual.</p></div><div class="action-row"><button data-key="Z">ZIP / Location</button><button data-key="R">Range</button></div></div>
+      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Service Types</h2><p>Open the scanner Service Types selection and enable only the services that are actually present.</p></div><button data-func="Z">Open Service Types</button></div>
+      <div class="card function-card"><div><span class="cap direct">DIRECT</span><h2>Location & Range</h2><p>Use ZIP/location and Range controls. Region-dependent options are taken from the connected scanner, not hard-coded from the US manual.</p></div><div class="action-row"><button data-key="Z">ZIP / Location</button><button data-range>Range</button></div></div>
       <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>System / Department / Site Quick Keys</h2><p>Use Manage Quick Key Status in the scanner menu for SQK/DQK hierarchy. FQK has a validated direct control above.</p></div><button data-open-menu>Open Menu</button></div>
-      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Priority / Close Call / Weather Priority</h2><p>Operational toggles are available through documented front-panel combinations and the scanner menu.</p></div><div class="action-row"><button data-sequence="F,." data-sequence-label="Priority mode">Priority</button><button data-sequence="F,6" data-sequence-label="Weather priority">WX Priority</button><button data-open-menu>More…</button></div></div>
+      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Priority / Close Call / Weather Priority</h2><p>Operational toggles are available through documented front-panel combinations and the scanner menu.</p></div><div class="action-row"><button data-func="." data-func-label="Priority mode">Priority</button><button data-func="6" data-func-label="Weather priority">WX Priority</button><button data-open-menu>More…</button></div></div>
     </div>
     <div class="card"><div class="card-head"><div><span class="cap direct">DIRECT</span><h2>Service Types</h2><p>Live SVC readback. Tap a type to toggle it; the scanner is re-read after every write.</p></div><button id="refreshSvc">Refresh</button></div><div id="svcGrid" class="chip-grid svc-grid"><span class="notice">Not loaded.</span></div></div>
   </section>
@@ -192,17 +192,17 @@
   <section class="page" aria-label="Search Close Call and Weather">
     <div class="section-title"><div><span>06</span><h1>Search & Special Modes</h1></div><span class="page-state">SEARCH</span></div>
     <div class="grid two">
-      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Quick Search / ID Search</h2><p>Func + E/Yes is context-sensitive: Quick Search from channel hold, or ID Search toggle while scanning an eligible trunked Favorites system.</p></div><button data-sequence="F,E" data-sequence-label="Func + E">FUNC + E/YES</button></div>
-      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Search Keys 1–3</h2><p>From channel hold, run the functions assigned to SRCH1/SRCH2/SRCH3.</p></div><div class="action-row"><button data-sequence="F,1" data-sequence-label="Search key 1">SRCH 1</button><button data-sequence="F,2" data-sequence-label="Search key 2">SRCH 2</button><button data-sequence="F,3" data-sequence-label="Search key 3">SRCH 3</button></div></div>
+      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Quick Search / ID Search</h2><p>Func + E/Yes is context-sensitive: Quick Search from channel hold, or ID Search toggle while scanning an eligible trunked Favorites system.</p></div><button data-func="E" data-func-label="Func + E">FUNC + E/YES</button></div>
+      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Search Keys 1–3</h2><p>From channel hold, run the functions assigned to SRCH1/SRCH2/SRCH3.</p></div><div class="action-row"><button data-func="1" data-func-label="Search key 1">SRCH 1</button><button data-func="2" data-func-label="Search key 2">SRCH 2</button><button data-func="3" data-func-label="Search key 3">SRCH 3</button></div></div>
       <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Custom Search / Search with Scan</h2><p>Configure ten custom searches, search limits, modulation, step, delay, attenuation, hold time and Search with Scan through Search For…</p></div><button data-open-menu>Open Menu</button></div>
       <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Close Call</h2><p>Close Call Only, Hits with Scan, Off/DND/Priority, alert, pause and band selection are scanner-menu functions.</p></div><button data-open-menu>Open Menu</button></div>
       <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Weather</h2><p>Weather Scan, alerts, SAME programming, delay, attenuation and WX priority remain available through the scanner menu where supported by the connected regional model.</p></div><button data-open-menu>Open Menu</button></div>
       <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Tone-Out</h2><p>Tone-Out Standby and Tone-Out Setup are available through the scanner menu.</p></div><button data-open-menu>Open Menu</button></div>
     </div>
     <div class="grid three">
-      <button data-sequence="F,4" data-sequence-label="Attenuator">ATT</button>
-      <button data-sequence="F,7" data-sequence-label="IF Exchange">IFX</button>
-      <button data-sequence="F,8" data-sequence-label="Reverse / repeater input">REV</button>
+      <button data-func="4" data-func-label="Attenuator">ATT</button>
+      <button data-func="7" data-func-label="IF Exchange">IFX</button>
+      <button data-func="8" data-func-label="Reverse / repeater input">REV</button>
     </div>
   </section>
 
@@ -212,7 +212,7 @@
     <div class="rf-view active" data-rf-panel="waterfall">
       <div class="card rf-card"><canvas id="spectrum" width="960" height="220"></canvas><canvas id="waterfall" width="960" height="270"></canvas><div class="rf-scale"><span id="lowerFreq">—</span><strong id="markerFreq">—</strong><span id="upperFreq">—</span></div></div>
       <div class="grid four rf-stats"><div class="card"><label>Centre</label><strong id="centerFreq">—</strong></div><div class="card"><label>Marker</label><strong id="markerFreq2">—</strong></div><div class="card"><label>Modulation</label><strong id="wfMod">—</strong></div><div class="card"><label>Span</label><strong id="wfSpan">—</strong></div><div class="card"><label>FFT samples</label><strong id="fftCount">—</strong></div></div>
-      <div class="action-row"><button id="waterfallStart">Enter Waterfall & Start</button><button data-key="B">SPAN</button><button data-key="C">HOLD / SWEEP</button><button data-sequence="F,A" data-sequence-label="Waterfall step">STEP</button><button data-sequence="F,B" data-sequence-label="Waterfall max hold">MAX HOLD</button><button data-sequence="F,C" data-sequence-label="Waterfall marker to centre">MARKER → CENTRE</button><button id="waterfallStop">Stop & Return to Scan</button><button id="waterfallStatus">Read GST status</button></div><p class="notice">Uniden calls the displayed RF bandwidth <b>Span</b>. These controls use the real Waterfall soft-key functions. FFT values are relative and uncalibrated.</p>
+      <div class="action-row"><button id="waterfallStart">Enter Waterfall & Start</button><button data-key="B">SPAN</button><button data-key="C">HOLD / SWEEP</button><button data-func="A" data-func-label="Waterfall step">STEP</button><button data-func="B" data-func-label="Waterfall max hold">MAX HOLD</button><button data-func="C" data-func-label="Waterfall marker to centre">MARKER → CENTRE</button><button id="waterfallStop">Stop & Return to Scan</button><button id="waterfallStatus">Read GST status</button></div><p class="notice">Uniden calls the displayed RF bandwidth <b>Span</b>. These controls use the real Waterfall soft-key functions. FFT values are relative and uncalibrated.</p>
     </div>
     <div class="rf-view" data-rf-panel="system"><div class="analysis-panel card"><h2>System Status</h2><p>Signal strength, decode quality and system activity analysis.</p><label>Site index <input id="systemSiteIndex" type="number" min="0" value="0" /></label><div class="action-row"><button data-analysis="SYSTEM_STATUS" data-site-source="systemSiteIndex">Start System Status</button><button data-pause="SYSTEM_STATUS">Pause / Resume</button></div><pre id="systemAnalysis">No command sent.</pre></div></div>
     <div class="rf-view" data-rf-panel="activity"><div class="analysis-panel card"><h2>Current Activity</h2><label>Site index <input id="activitySiteIndex" type="number" min="0" value="0" /></label><div class="action-row"><button data-analysis="CURRENT_ACTIVITY" data-site-source="activitySiteIndex">Start Current Activity</button><button data-pause="CURRENT_ACTIVITY">Pause / Resume</button></div><pre id="activityAnalysis">No command sent.</pre></div></div>
@@ -242,8 +242,8 @@
   <section class="page" aria-label="Scanner Settings">
     <div class="section-title"><div><span>09</span><h1>Scanner Settings</h1></div><span class="page-state">CONFIGURATION</span></div>
     <div class="grid two">
-      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Display & Backlight</h2><p>Backlight behavior, dimmer, keypad light, display customization, simple/detail display and color/B&amp;W modes.</p></div><div class="action-row"><button data-sequence="F,5" data-sequence-label="Dimmer">Dimmer</button><button data-sequence="F,9" data-sequence-label="Simple/detail display">Simple / Detail</button><button data-open-menu>More…</button></div></div>
-      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Reception Helpers</h2><p>Attenuation, IF Exchange, repeater reverse/input and per-channel volume offset are context-sensitive functions.</p></div><div class="action-row"><button data-sequence="F,4" data-sequence-label="Attenuator">ATT</button><button data-sequence="F,7" data-sequence-label="IF Exchange">IFX</button><button data-sequence="F,8" data-sequence-label="Reverse">REV</button><button data-sequence="F,0" data-sequence-label="Volume offset">VOL OFFSET</button></div></div>
+      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Display & Backlight</h2><p>Backlight behavior, dimmer, keypad light, display customization, simple/detail display and color/B&amp;W modes.</p></div><div class="action-row"><button data-func="5" data-func-label="Dimmer">Dimmer</button><button data-func="9" data-func-label="Simple/detail display">Simple / Detail</button><button data-open-menu>More…</button></div></div>
+      <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Reception Helpers</h2><p>Attenuation, IF Exchange, repeater reverse/input and per-channel volume offset are context-sensitive functions.</p></div><div class="action-row"><button data-func="4" data-func-label="Attenuator">ATT</button><button data-func="7" data-func-label="IF Exchange">IFX</button><button data-func="8" data-func-label="Reverse">REV</button><button data-func="0" data-func-label="Volume offset">VOL OFFSET</button></div></div>
       <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>General Settings</h2><p>Key beep, clock, band defaults, auto shutoff, ID formats, scan display mode, replay options and scanner information.</p></div><button data-open-menu>Open Menu</button></div>
       <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Location / GPS</h2><p>Manual location, saved locations, range, GPS format and serial-port settings are accessed through Set Your Location.</p></div><button data-open-menu>Open Menu</button></div>
       <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Avoids & Review</h2><p>Review/clear database, Favorites, search and ID avoids from their respective scanner menu sections.</p></div><button data-open-menu>Open Menu</button></div>

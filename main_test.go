@@ -91,12 +91,46 @@ func TestParseSTSRealWaterfallSample(t *testing.T) {
 	}
 }
 
-func TestKeyMapIncludesFrequencyAndServiceControls(t *testing.T) {
-	want := map[string]string{".": "No / Decimal", "T": "Service Type", "R": "Range"}
-	for key, label := range want {
-		if got := keyCodes[key]; got != label {
-			t.Fatalf("key %q: got %q want %q", key, got, label)
+// Verified on SDS200E fw 1.23.15: T, R and Q are not SDS200 keys (the radio
+// treats them as digit entry and opens Quick Key Navigation), so they must
+// not be accepted. Service Types is FUNC+Z; squelch-knob push is Menu (M).
+func TestKeyMapMatchesSDS200Panel(t *testing.T) {
+	for _, k := range []string{".", "E", "M", "F", "L", "Z", "Y", "V", "^", "<", ">", "A", "B", "C"} {
+		if keyCodes[k] == "" {
+			t.Fatalf("key %q missing", k)
 		}
+	}
+	for _, k := range []string{"T", "R", "Q"} {
+		if _, ok := keyCodes[k]; ok {
+			t.Fatalf("key %q must not be accepted on SDS200", k)
+		}
+	}
+}
+
+func TestHoldWireUsesIndexes(t *testing.T) {
+	i := func(n int) *int { return &n }
+	st := map[string]any{"system_index": i(2), "department_index": i(647), "channel_index": i(681), "channel_kind": "ConvFrequency"}
+	cases := map[string]string{"system": "HLD,SYS,2,", "department": "HLD,DEPT,647,2", "channel": "HLD,CFREQ,681,", "site": ""}
+	for scope, want := range cases {
+		if got := holdWire(scope, st); got != want {
+			t.Fatalf("%s: got %q want %q", scope, got, want)
+		}
+	}
+}
+
+func TestParseWaterfallHex(t *testing.T) {
+	vals := make([]string, 240)
+	for i := range vals {
+		vals[i] = "10"
+	}
+	vals[0] = "1a"
+	d := parseWaterfallLine("GWF," + strings.Join(vals, ",") + ",")
+	if d == nil {
+		t.Fatal("nil frame")
+	}
+	v := d["values"].([]float64)
+	if v[0] != 26 || v[1] != 16 {
+		t.Fatalf("hex decode wrong: %v %v", v[0], v[1])
 	}
 }
 

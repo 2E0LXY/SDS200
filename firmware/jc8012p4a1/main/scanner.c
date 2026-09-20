@@ -31,6 +31,8 @@ static const char *TAG = "scanner";
 
 typedef enum {
     SC_KEY,
+    SC_FUNC,
+    SC_STEP,
     SC_VOL,
     SC_SQL,
     SC_FQK_GET,
@@ -405,6 +407,13 @@ static void parse_gsi(void)
     strlcpy(s->channel_tag, ch_tag, sizeof(s->channel_tag));
     xml_attr(ch, "Name", s->channel, sizeof(s->channel));
     xml_attr(ch, "Hold", s->channel_hold, sizeof(s->channel_hold));
+    s->channel_index = attr_int(ch, "Index", -1);
+    {
+        char f[8] = "";
+        xml_attr(prop, "F", f, sizeof(f));
+        s->func_on = strcmp(f, "On") == 0;
+        s->popup = strstr(x, "<PopupScreen") != NULL;
+    }
     xml_attr(ch, "SvcType", s->service_type, sizeof(s->service_type));
 
     if (!xml_attr(ch, "Freq", s->frequency, sizeof(s->frequency)) || !s->frequency[0]) {
@@ -736,6 +745,77 @@ static void scanner_task(void *arg)
                 next_sts = now_ms();
                 next_gsi = now_ms() + 200;
                 break;
+            case SC_FUNC: {
+                /* wait out transient popups: a key press during one only dismisses it */
+                bool popup = true, fon = false;
+                for (int i = 0; i < 15 && popup; i++) {
+                    if (transact("GSI", 2500) < 0) {
+                        break;
+                    }
+                    parse_gsi();
+                    lock();
+                    popup = s_st.popup;
+                    fon = s_st.func_on;
+                    unlock();
+                    if (popup) {
+                        vTaskDelay(pdMS_TO_TICKS(200));
+                    }
+                }
+                bool ok = true;
+                if (!fon) {
+                    ok = transact("KEY,F,P", SCANNER_TIMEOUT_MS) >= 0 && reply_ok("KEY");
+                    vTaskDelay(pdMS_TO_TICKS(250));
+                }
+                snprintf(line, sizeof(line), "KEY,%c,P", (char)cmd.value);
+                ok = ok && transact(line, SCANNER_TIMEOUT_MS) >= 0 && reply_ok("KEY");
+                if (ok) {
+                    note_result(true);
+                } else {
+                    set_error("FUNC key not acknowledged");
+                }
+                next_sts = now_ms();
+                next_gsi = now_ms() + 200;
+                break;
+            }
+            case SC_STEP: {
+                char tag[20];
+                int idx;
+                lock();
+                strlcpy(tag, s_st.channel_tag, sizeof(tag));
+                idx = s_st.channel_index;
+                unlock();
+                const char *tkw = NULL;
+                if (!strcmp(tag, "ConvFrequency")) {
+                    tkw = "CFREQ";
+                } else if (!strcmp(tag, "TGID")) {
+                    tkw = "TGID";
+                } else if (!strcmp(tag, "CcHitsChannel")) {
+                    tkw = "CCHIT";
+                } else if (!strcmp(tag, "ToneOutChannel")) {
+                    tkw = "FTO";
+                } else if (!strcmp(tag, "WxChannel")) {
+                    tkw = "WX";
+                }
+                const char *verb = cmd.value > 0 ? "NXT" : "PRV";
+                bool ok = false;
+                if (tkw && idx >= 0) {
+                    snprintf(line, sizeof(line), "%s,%s,%d,,1", verb, tkw, idx);
+                    ok = transact(line, SCANNER_TIMEOUT_MS) >= 0 && reply_ok(verb);
+                }
+                if (!ok) {
+                    /* no channel index in this mode (search/Close Call): use the rotary */
+                    snprintf(line, sizeof(line), "KEY,%c,P", cmd.value > 0 ? '>' : '<');
+                    ok = transact(line, SCANNER_TIMEOUT_MS) >= 0 && reply_ok("KEY");
+                }
+                if (ok) {
+                    note_result(true);
+                } else {
+                    set_error("Next/previous not acknowledged");
+                }
+                next_sts = now_ms();
+                next_gsi = now_ms() + 200;
+                break;
+            }
             case SC_VOL:
             case SC_SQL:
                 snprintf(line, sizeof(line), "%s,%d", cmd.type == SC_VOL ? "VOL" : "SQL", cmd.value);
@@ -922,10 +1002,26 @@ static bool enqueue(sc_type_t type, int value, const uint8_t *fqk)
     return xQueueSend(s_q, &c, 0) == pdTRUE;
 }
 
+/* T, R and Q are not SDS200 keys (verified on fw 1.23.15: the radio treats
+ * them as digit entry). Service Types = FUNC+Z; squelch-knob push = MENU. */
+static const char s_valid_keys[] = "MFL0123456789.E><^VYABCZ";
+
+bool scanner_func(char code)
+{
+    if (!code || code == 'F' || !strchr(s_valid_keys, code)) {
+        return false;
+    }
+    return enqueue(SC_FUNC, code, NULL);
+}
+
+bool scanner_step(int dir)
+{
+    return enqueue(SC_STEP, dir > 0 ? 1 : -1, NULL);
+}
+
 bool scanner_key(char code)
 {
-    static const char valid[] = "MFL0123456789.E><^VQYABCZTR";
-    if (!code || !strchr(valid, code)) {
+    if (!code || !strchr(s_valid_keys, code)) {
         return false;
     }
     return enqueue(SC_KEY, code, NULL);

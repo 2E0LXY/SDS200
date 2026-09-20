@@ -45,6 +45,9 @@ typedef struct {
     char department_hold[8];
     char site_hold[8];
     char channel_hold[8];
+    int channel_index;         /* -1 unknown */
+    bool func_on;              /* FUNC modifier active (Property F) */
+    bool popup;                /* transient popup shown */
     int volume;                /* -1 unknown */
     int squelch;               /* -1 unknown */
     int rssi;                  /* dBm, 0 unknown */
@@ -83,6 +86,10 @@ void scanner_set_ip(const char *ip);
 
 /* Queued commands. Return false if the queue is full. */
 bool scanner_key(char code);
+/* FUNC+key: presses F only if FUNC is not already active (e.g. Service Types = FUNC+Z). */
+bool scanner_func(char code);
+/* Next (+1) / previous (-1) channel via NXT/PRV with the current index; rotary fallback. */
+bool scanner_step(int dir);
 bool scanner_set_volume(int v);
 bool scanner_set_squelch(int v);
 bool scanner_fqk_refresh(void);

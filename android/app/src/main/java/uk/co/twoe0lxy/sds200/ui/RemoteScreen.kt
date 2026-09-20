@@ -1,5 +1,9 @@
 package uk.co.twoe0lxy.sds200.ui
 
+import androidx.compose.runtime.remember
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -115,6 +119,53 @@ class RemoteViewModel(private val graph: AppGraph) : ViewModel() {
         }
     }
 
+    fun func(code: Char) {
+        keyBusy = true
+        viewModelScope.launch {
+            try {
+                graph.scanner.func(code)?.let { display = it }
+                error = null
+            } catch (e: Exception) {
+                error = e.userMessage()
+            } finally {
+                keyBusy = false
+            }
+        }
+    }
+
+    var rangeDialog by mutableStateOf<String?>(null)
+    var rangeNote by mutableStateOf("")
+
+    fun openRange() {
+        viewModelScope.launch {
+            try {
+                val l = graph.scanner.location()
+                rangeNote = "Location %.4f, %.4f".format(java.util.Locale.ROOT, l.latitude, l.longitude)
+                rangeDialog = l.rangeMiles.toString()
+                error = null
+            } catch (e: Exception) {
+                error = e.userMessage()
+            }
+        }
+    }
+
+    fun applyRange(text: String) {
+        rangeDialog = null
+        val v = text.trim().toDoubleOrNull()
+        if (v == null || v < 0 || v > 999) {
+            error = "Range must be 0-999 miles"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                graph.scanner.setRange(v)
+                error = null
+            } catch (e: Exception) {
+                error = e.userMessage()
+            }
+        }
+    }
+
     fun changeVolume(v: Int) {
         volume = v
         volumeWrites.tryEmit(v)
@@ -137,6 +188,21 @@ fun RemoteScreen() {
         ScannerDisplay(vm.display)
         ErrorText(vm.error)
         Keypad(vm)
+        vm.rangeDialog?.let { initial ->
+            var text by remember(initial) { mutableStateOf(initial) }
+            AlertDialog(
+                onDismissRequest = { vm.rangeDialog = null },
+                title = { Text("Scan range (miles)") },
+                text = {
+                    Column {
+                        Text(vm.rangeNote, style = MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true)
+                    }
+                },
+                confirmButton = { TextButton(onClick = { vm.applyRange(text) }) { Text("Set") } },
+                dismissButton = { TextButton(onClick = { vm.rangeDialog = null }) { Text("Cancel") } },
+            )
+        }
         SectionCard {
             LevelSlider("Volume", vm.volume, 29) { vm.changeVolume(it) }
             LevelSlider("Squelch", vm.squelch, 19) { vm.changeSquelch(it) }
@@ -204,7 +270,14 @@ fun styledLine(line: StsLine): AnnotatedString = buildAnnotatedString {
     }
 }
 
-private data class K(val label: String, val code: Char)
+private fun K.press(vm: RemoteViewModel) = when {
+    range -> vm.openRange()
+    func -> vm.func(code)
+    else -> vm.key(code)
+}
+
+/** [func] = press FUNC first (only if not already active); [range] = LCR range dialog. */
+private data class K(val label: String, val code: Char, val func: Boolean = false, val range: Boolean = false)
 
 @Composable
 private fun Keypad(vm: RemoteViewModel) {
@@ -217,8 +290,8 @@ private fun Keypad(vm: RemoteViewModel) {
         KeyRow(vm, K("4", '4'), K("5", '5'), K("6", '6'))
         KeyRow(vm, K("7", '7'), K("8", '8'), K("9", '9'))
         KeyRow(vm, K(". / NO", '.'), K("0", '0'), K("E / YES", 'E'))
-        KeyRow(vm, K("SERVICE", 'T'), K("RANGE", 'R'), K("ZIP", 'Z'))
-        KeyRow(vm, K("VOL push", 'V'), K("SQL push", 'Q'))
+        KeyRow(vm, K("SERVICE", 'Z', func = true), K("RANGE", 'Z', range = true), K("ZIP", 'Z'))
+        KeyRow(vm, K("VOL push", 'V'), K("SQL/MENU push", 'M'))
     }
 }
 
@@ -235,11 +308,11 @@ private fun RowScope.KeyButton(k: K, vm: RemoteViewModel) {
     val mod = Modifier.weight(1f).height(46.dp)
     val pad = PaddingValues(horizontal = 4.dp)
     if (digit) {
-        FilledTonalButton(onClick = { vm.key(k.code) }, modifier = mod, contentPadding = pad, shape = RoundedCornerShape(8.dp)) {
+        FilledTonalButton(onClick = { k.press(vm) }, modifier = mod, contentPadding = pad, shape = RoundedCornerShape(8.dp)) {
             Text(k.label, fontSize = 18.sp, maxLines = 1)
         }
     } else {
-        OutlinedButton(onClick = { vm.key(k.code) }, modifier = mod, contentPadding = pad, shape = RoundedCornerShape(8.dp)) {
+        OutlinedButton(onClick = { k.press(vm) }, modifier = mod, contentPadding = pad, shape = RoundedCornerShape(8.dp)) {
             Text(k.label, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

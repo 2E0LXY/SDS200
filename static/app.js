@@ -76,7 +76,7 @@ $$('[data-hold]').forEach(b=>b.onclick=()=>setHold(b.dataset.hold,!held(stateCac
 $('#liveHold').onclick=()=>setHold('channel',!held(stateCache.channel_hold));
 
 function channelNavTarget(){return {TGID:'TGID',ConvFrequency:'CFREQ',WxChannel:'WX',ToneOutChannel:'FTO',CcHitsChannel:'CCHIT',SrchFrequency:'QS_FREQ'}[stateCache.channel_kind]||null}
-async function nav(direction){const target=channelNavTarget();if(!target||stateCache.channel_index===null||stateCache.channel_index===undefined){log('Current scanner state does not expose a navigable channel index');return}try{await control(`/api/nav/${direction}`,{target,first:stateCache.channel_index,count:1});log(`${direction} ${target}`);setTimeout(refresh,250)}catch(e){log(e.message)}}
+async function nav(direction){const target=channelNavTarget();if(!target||stateCache.channel_index===null||stateCache.channel_index===undefined){try{const d=await control('/api/control/key',{key:direction==='next'?'>':'<'});if(d.display)renderDisplay(d.display);log(`${direction} (rotary — no channel index in this mode)`,'INFO','CONTROL');setTimeout(refresh,250)}catch(e){log(e.message)}return}try{await control(`/api/nav/${direction}`,{target,first:stateCache.channel_index,count:1});log(`${direction} ${target}`);setTimeout(refresh,250)}catch(e){log(e.message)}}
 $('#liveNext').onclick=()=>nav('next');$('#livePrevious').onclick=()=>nav('previous');
 $('#dashHold').onclick=()=>setHold('channel',!held(stateCache.channel_hold));$('#dashNext').onclick=()=>nav('next');$('#dashPrevious').onclick=()=>nav('previous');
 
@@ -243,3 +243,8 @@ async function readClock(){try{const d=await api('/api/clock');const off=Math.ab
 if($('#readClock'))$('#readClock').onclick=readClock;
 if($('#syncClock'))$('#syncClock').onclick=async()=>{try{await control('/api/clock',{});log('Scanner clock synchronised','INFO','CONTROL')}catch(e){log(`Clock sync: ${e.message}`,'WARN','CONTROL')}readClock()};
 setTimeout(()=>{loadSvc();readClock()},1500);
+
+// ---- FUNC + key (reliable: server checks FUNC state and waits out popups) ----
+$$('[data-func]').forEach(b=>b.onclick=async()=>{const label=b.dataset.funcLabel||b.textContent.trim();try{const d=await control('/api/control/func',{key:b.dataset.func});if(d.display)renderDisplay(d.display);log(`FUNC + ${b.dataset.func} (${label})`,'INFO','CONTROL');setTimeout(refresh,200)}catch(e){log(`${label}: ${e.message}`,'WARN','CONTROL')}});
+// ---- Range (LCR) — the SDS200 has no Range key ----
+$$('[data-range]').forEach(b=>b.onclick=async()=>{try{const cur=await api('/api/location');const v=prompt(`Scan range in miles (current ${cur.range}; location ${cur.latitude.toFixed(4)}, ${cur.longitude.toFixed(4)})`,String(cur.range));if(v===null)return;const r=Number(v);if(!Number.isFinite(r)||r<0||r>999){log('Range must be 0–999 miles','WARN','CONTROL');return}await control('/api/location',{range:r});const now=await api('/api/location');log(`Range set to ${now.range} miles`,'INFO','CONTROL')}catch(e){log(`Range: ${e.message}`,'WARN','CONTROL')}});

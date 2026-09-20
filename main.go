@@ -381,6 +381,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/control/squelch", a.apiSquelch)
 	mux.HandleFunc("/api/control/record", a.apiRecord)
 	mux.HandleFunc("/api/control/key", a.apiKey)
+	mux.HandleFunc("/api/control/func", a.apiFunc)
+	mux.HandleFunc("/api/location", a.apiLocation)
 	mux.HandleFunc("/api/control/hold/", a.apiHold)
 	mux.HandleFunc("/api/nav/", a.apiNav)
 	mux.HandleFunc("/api/fqk", a.apiFQK)
