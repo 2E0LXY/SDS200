@@ -1,42 +1,80 @@
-name: build-windows
+name: build
 
 on:
   push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore: ['firmware/**']
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  test-and-build:
+  test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Test
-        run: go test ./...
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - name: Vet
         run: go vet ./...
-      - name: Check browser JavaScript
-        run: node --check static/app.js
-      - name: Build Windows amd64
-        env:
-          GOOS: windows
-          GOARCH: amd64
-          CGO_ENABLED: '0'
+      - name: Test
+        run: go test -race ./...
+      - name: Check browser JavaScript (esbuild, Go binary - no Node)
+        run: go run github.com/evanw/esbuild/cmd/esbuild@v0.25.10 static/app.js --log-level=warning > /dev/null
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Version
+        id: v
         run: |
-          mkdir -p dist
-          go build -trimpath -ldflags="-s -w" -o dist/SDS200-WebApp.exe .
-          sha256sum dist/SDS200-WebApp.exe > dist/SHA256.txt
-          cp WINDOWS_TEST_README.txt FUNCTION_MAP.txt README.md dist/
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.8.0-dev.${GITHUB_RUN_NUMBER}+$(git rev-parse --short HEAD)"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: Windows amd64
+        run: |
+          mkdir -p dist/win
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.appVersion=${{ steps.v.outputs.version }}" -o dist/win/SDS200-WebApp.exe .
+          cp README.md FUNCTION_MAP.txt WINDOWS_TEST_README.txt dist/win/
+          (cd dist/win && zip -q -9 ../SDS200-WebApp-${{ steps.v.outputs.version }}-windows-amd64.zip *)
+      - name: Linux .deb (amd64, arm64, armhf)
+        run: |
+          for a in amd64 arm64 armhf; do bash scripts/build-deb.sh "${{ steps.v.outputs.version }}" "$a" dist; done
+      - name: Checksums
+        run: cd dist && sha256sum *.zip *.deb > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: SDS200-Windows-amd64
-          path: dist/
+          name: SDS200-WebApp-${{ steps.v.outputs.version }}
+          path: |
+            dist/*.zip
+            dist/*.deb
+            dist/SHA256SUMS.txt
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

@@ -1,0 +1,59 @@
+name: firmware
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+    paths:
+      - 'firmware/**'
+      - '.github/workflows/firmware.yml'
+  pull_request:
+    paths:
+      - 'firmware/**'
+      - '.github/workflows/firmware.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  jc8012p4a1:
+    name: Guition JC8012P4A1 (ESP32-P4)
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.4.2
+    permissions:
+      contents: write   # needed only to attach the image to a release on v* tags
+    defaults:
+      run:
+        shell: bash
+        working-directory: firmware/jc8012p4a1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # lets ESP-IDF embed `git describe` as the firmware version
+
+      - name: Build
+        run: |
+          git config --global --add safe.directory '*'
+          . "$IDF_PATH/export.sh"
+          idf.py set-target esp32p4
+          idf.py build
+          idf.py merge-bin -o SDS200-Panel-JC8012P4A1.factory.bin
+          cp build/SDS200-Panel-JC8012P4A1.factory.bin .
+          ls -l SDS200-Panel-JC8012P4A1.factory.bin build/sds200_panel.bin
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SDS200-Panel-JC8012P4A1
+          path: |
+            firmware/jc8012p4a1/SDS200-Panel-JC8012P4A1.factory.bin
+            firmware/jc8012p4a1/build/sds200_panel.bin
+            firmware/jc8012p4a1/build/sds200_panel.elf
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: firmware/jc8012p4a1/SDS200-Panel-JC8012P4A1.factory.bin
