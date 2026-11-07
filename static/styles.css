@@ -25,3 +25,16 @@
 @media(max-width:760px){.log-controls{grid-template-columns:1fr}.log-path{max-width:100%;text-align:left}.logging-card .card-head{align-items:stretch;flex-direction:column}}
 
 .svc-grid button.on{background:#0d4d2f;border-color:#2fd07a;color:#c9ffe0}.svc-grid button.off{opacity:.62}.svc-grid button{min-width:0}
+
+.assistant-card{grid-column:1/-1}
+.ai-log{max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin:6px 0}
+.ai-msg{padding:.5rem .65rem;border-radius:10px;font-size:12px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.ai-msg.you{background:#0d2b3f;border:1px solid #1d4f70;align-self:flex-end;max-width:85%}
+.ai-msg.bot{background:#0a1f2e;border:1px solid #1b3b50}
+.ai-msg.err{background:#3a1420;border:1px solid #7d2740;color:#ffc9d4}
+.ai-steps{margin:6px 0 0;padding:0;list-style:none;font:11px ui-monospace,monospace;color:#8fb6cd}
+.ai-steps li{padding:1px 0}
+.ai-steps li.bad{color:#ff9fb0}
+.ai-form{display:grid;grid-template-columns:1fr auto;gap:6px}
+.ai-form input{width:100%}
+.ai-busy{opacity:.6}

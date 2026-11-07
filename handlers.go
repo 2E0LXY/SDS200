@@ -1281,27 +1281,12 @@ var presetServiceTypes = []string{"Multi-Dispatch", "Law Dispatch", "Fire Dispat
 func (a *App) apiServiceTypes(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		res, err := a.command("SVC", 1500*time.Millisecond)
+		items, err := a.serviceTypes()
 		if err != nil {
 			errJSON(w, err)
 			return
 		}
-		f := packetFields(res.Raw, "SVC")
-		if len(f) < 47 {
-			errJSON(w, &httpError{502, fmt.Sprintf("SVC returned %d fields, expected 47", len(f))})
-			return
-		}
-		items := make([]map[string]any, 0, 47)
-		for i := 0; i < 47; i++ {
-			name := ""
-			if i < 37 {
-				name = presetServiceTypes[i]
-			} else {
-				name = fmt.Sprintf("Custom %d", i-36)
-			}
-			items = append(items, map[string]any{"slot": i, "name": name, "enabled": strings.TrimSpace(f[i]) == "1", "custom": i >= 37})
-		}
-		writeJSON(w, 200, map[string]any{"items": items, "raw": res.Raw})
+		writeJSON(w, 200, map[string]any{"items": items})
 	case "POST":
 		if err := a.requireControl(r); err != nil {
 			errJSON(w, err)
@@ -1374,6 +1359,111 @@ func (a *App) apiClock(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, d)
 	default:
+		writeJSON(w, 405, map[string]any{"detail": "method not allowed"})
+	}
+}
+
+// ---------------------------------------------------------------- assistant
+
+// apiAI answers one natural-language request, executing scanner tools.
+func (a *App) apiAI(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, "POST") {
+		return
+	}
+	if err := a.requireControl(r); err != nil {
+		errJSON(w, err)
+		return
+	}
+	var b struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := readJSON(r, &b); err != nil {
+		errJSON(w, err)
+		return
+	}
+	prompt := strings.TrimSpace(b.Prompt)
+	if prompt == "" {
+		errJSON(w, &httpError{422, "prompt is required"})
+		return
+	}
+	if len(prompt) > 4000 {
+		errJSON(w, &httpError{422, "prompt is too long"})
+		return
+	}
+	cfg := a.configSnapshot()
+	if cfg.AI.GoogleAPIKey == "" && cfg.AI.OpenRouterAPIKey == "" {
+		errJSON(w, &httpError{503, "no AI provider configured: add a Google API key (and optionally an OpenRouter key) on the System page"})
+		return
+	}
+	runner := newAIRunner(cfg.AI, a.aiTools(), a.log)
+	a.log.Info("AI", "Request", map[string]any{"prompt": shorten(prompt, 200)})
+	res, err := runner.Run(r.Context(), prompt, aiSystemPrompt)
+	if err != nil {
+		a.log.Error("AI", "Request failed", map[string]any{"error": err.Error()})
+		errJSON(w, &httpError{502, err.Error()})
+		return
+	}
+	a.log.Info("AI", "Answered", map[string]any{"provider": res.Provider, "model": res.Model, "steps": len(res.Steps), "fallback": res.Fallback})
+	writeJSON(w, 200, res)
+}
+
+// apiAIConfig reports which providers are configured and stores keys. Keys are
+// write-only: they are never returned.
+func (a *App) apiAIConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		c := a.configSnapshot().AI
+		writeJSON(w, 200, map[string]any{
+			"google_configured":     c.GoogleAPIKey != "",
+			"openrouter_configured": c.OpenRouterAPIKey != "",
+			"google_model":          c.googleModel(),
+			"openrouter_model":      c.openRouterModel(),
+			"max_steps":             c.maxSteps(),
+			"available":             c.GoogleAPIKey != "" || c.OpenRouterAPIKey != "",
+		})
+	case "POST":
+		if err := a.requireControl(r); err != nil {
+			errJSON(w, err)
+			return
+		}
+		var b struct {
+			GoogleAPIKey     *string `json:"google_api_key"`
+			GoogleModel      *string `json:"google_model"`
+			OpenRouterAPIKey *string `json:"openrouter_api_key"`
+			OpenRouterModel  *string `json:"openrouter_model"`
+			MaxSteps         *int    `json:"max_steps"`
+		}
+		if err := readJSON(r, &b); err != nil {
+			errJSON(w, err)
+			return
+		}
+		a.mu.Lock()
+		if b.GoogleAPIKey != nil {
+			a.cfg.AI.GoogleAPIKey = strings.TrimSpace(*b.GoogleAPIKey)
+		}
+		if b.OpenRouterAPIKey != nil {
+			a.cfg.AI.OpenRouterAPIKey = strings.TrimSpace(*b.OpenRouterAPIKey)
+		}
+		if b.GoogleModel != nil {
+			a.cfg.AI.GoogleModel = strings.TrimSpace(*b.GoogleModel)
+		}
+		if b.OpenRouterModel != nil {
+			a.cfg.AI.OpenRouterModel = strings.TrimSpace(*b.OpenRouterModel)
+		}
+		if b.MaxSteps != nil {
+			a.cfg.AI.MaxSteps = *b.MaxSteps
+		}
+		a.cfg.AI.Enabled = a.cfg.AI.GoogleAPIKey != "" || a.cfg.AI.OpenRouterAPIKey != ""
+		cfg := a.cfg
+		a.mu.Unlock()
+		if err := saveJSON(a.cfgPath, cfg); err != nil {
+			errJSON(w, err)
+			return
+		}
+		a.log.Info("AI", "Provider settings changed", map[string]any{"google": cfg.AI.GoogleAPIKey != "", "openrouter": cfg.AI.OpenRouterAPIKey != ""})
+		writeJSON(w, 200, map[string]any{"google_configured": cfg.AI.GoogleAPIKey != "", "openrouter_configured": cfg.AI.OpenRouterAPIKey != "", "available": cfg.AI.Enabled})
+	default:
+		w.Header().Set("Allow", "GET, POST")
 		writeJSON(w, 405, map[string]any{"detail": "method not allowed"})
 	}
 }

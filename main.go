@@ -30,15 +30,16 @@ var appVersion = "0.8.0-dev"
 var staticFS embed.FS
 
 type Config struct {
-	Host         string `json:"host"`
-	UDPPort      int    `json:"udp_port"`
-	HTTPPort     int    `json:"http_port"`
-	RTSPPort     int    `json:"rtsp_port"`
-	RTSPPath     string `json:"rtsp_path"`
-	ControlToken string `json:"control_token,omitempty"`
-	LeaseTTL     int    `json:"lease_ttl"`
-	StateCacheMS int    `json:"state_cache_ms"`
-	LogLevel     string `json:"log_level"`
+	Host         string   `json:"host"`
+	UDPPort      int      `json:"udp_port"`
+	HTTPPort     int      `json:"http_port"`
+	RTSPPort     int      `json:"rtsp_port"`
+	RTSPPath     string   `json:"rtsp_path"`
+	ControlToken string   `json:"control_token,omitempty"`
+	LeaseTTL     int      `json:"lease_ttl"`
+	StateCacheMS int      `json:"state_cache_ms"`
+	LogLevel     string   `json:"log_level"`
+	AI           AIConfig `json:"ai"`
 }
 
 func defaultConfig() Config {
@@ -64,6 +65,15 @@ func appDataDir() string {
 	}
 	return filepath.Join(os.TempDir(), "SDS200-WebApp")
 }
+func firstEnv(names ...string) string {
+	for _, n := range names {
+		if v := strings.TrimSpace(os.Getenv(n)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func loadJSON(path string, v any) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -141,6 +151,17 @@ func NewApp() (*App, error) {
 	}
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = d.LogLevel
+	}
+	// Keys may also come from the environment, which keeps them out of the
+	// config file on shared machines.
+	if v := firstEnv("SDS200_GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"); v != "" && cfg.AI.GoogleAPIKey == "" {
+		cfg.AI.GoogleAPIKey = v
+	}
+	if v := firstEnv("SDS200_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"); v != "" && cfg.AI.OpenRouterAPIKey == "" {
+		cfg.AI.OpenRouterAPIKey = v
+	}
+	if cfg.AI.GoogleAPIKey != "" || cfg.AI.OpenRouterAPIKey != "" {
+		cfg.AI.Enabled = true
 	}
 	lg, err := NewAppLogger(filepath.Join(dir, "logs"), cfg.LogLevel)
 	if err != nil {
@@ -391,6 +412,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/menu", a.apiMenu)
 	mux.HandleFunc("/api/service-types", a.apiServiceTypes)
 	mux.HandleFunc("/api/clock", a.apiClock)
+	mux.HandleFunc("/api/ai", a.apiAI)
+	mux.HandleFunc("/api/ai/config", a.apiAIConfig)
 	mux.HandleFunc("/api/waterfall/status", a.apiWaterfallStatus)
 	mux.HandleFunc("/api/waterfall/start", a.apiWaterfallStart)
 	mux.HandleFunc("/api/waterfall/stop", a.apiWaterfallStop)

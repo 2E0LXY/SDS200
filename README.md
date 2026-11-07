@@ -31,6 +31,29 @@ Data (config, logs, WAV recordings): Windows `%LOCALAPPDATA%\SDS200-WebApp`, Lin
 
 Linux service options: `/etc/default/sds200-webapp` (`SDS200_ARGS`). To front it with Caddy, bind to loopback (`-listen 127.0.0.1:8765`), set `control_token` in `config.json`, and use `/usr/share/doc/sds200-webapp/Caddyfile.example`.
 
+## Assistant (natural-language control)
+
+`POST /api/ai {"prompt": "..."}` runs a tool-calling loop over the scanner: the
+model may read the state and display, set volume/squelch, press keys and FUNC
+pairs, hold/release, step channels, avoid, switch modes, tune a frequency,
+read and set service types and quick keys, browse memory, set location/range,
+read and sync the clock, drive the waterfall and audio, and walk the scanner's
+own menus. Each answer returns the tool calls it made, so nothing is hidden.
+
+| Provider | Default model | Key |
+|---|---|---|
+| Google (Gemini) — tried first | `gemini-flash-latest`, auto-resolved from the model list if that id is retired | `SDS200_GOOGLE_API_KEY`, `GEMINI_API_KEY` or `GOOGLE_API_KEY` |
+| OpenRouter — fallback | `google/gemini-2.5-flash` | `SDS200_OPENROUTER_API_KEY` or `OPENROUTER_API_KEY` |
+
+Keys may instead be set from the System page ("API keys"), which stores them in
+`config.json`; they are never returned by the API. Models are configurable with
+`google_model` / `openrouter_model`. The fallback fires whenever Google is
+unconfigured, rate-limited or erroring, and the reason is reported with the
+answer. Requests need operator control, like any other write.
+
+Programming favourites (new systems, departments and channels) is not exposed:
+it needs the microSD card, not the LAN protocol. See `docs/FILE_FORMAT.md`.
+
 ## Design rules
 - Real scanner only: no simulation, demo telemetry, synthetic waterfall or fallback audio.
 - Key presses are confirmed by a fresh STS read (retried while the scanner redraws).

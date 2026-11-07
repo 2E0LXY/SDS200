@@ -248,3 +248,34 @@ setTimeout(()=>{loadSvc();readClock()},1500);
 $$('[data-func]').forEach(b=>b.onclick=async()=>{const label=b.dataset.funcLabel||b.textContent.trim();try{const d=await control('/api/control/func',{key:b.dataset.func});if(d.display)renderDisplay(d.display);log(`FUNC + ${b.dataset.func} (${label})`,'INFO','CONTROL');setTimeout(refresh,200)}catch(e){log(`${label}: ${e.message}`,'WARN','CONTROL')}});
 // ---- Range (LCR) — the SDS200 has no Range key ----
 $$('[data-range]').forEach(b=>b.onclick=async()=>{try{const cur=await api('/api/location');const v=prompt(`Scan range in miles (current ${cur.range}; location ${cur.latitude.toFixed(4)}, ${cur.longitude.toFixed(4)})`,String(cur.range));if(v===null)return;const r=Number(v);if(!Number.isFinite(r)||r<0||r>999){log('Range must be 0–999 miles','WARN','CONTROL');return}await control('/api/location',{range:r});const now=await api('/api/location');log(`Range set to ${now.range} miles`,'INFO','CONTROL')}catch(e){log(`Range: ${e.message}`,'WARN','CONTROL')}});
+
+// ---- Assistant (Google first, OpenRouter fallback; configured server-side) ----
+async function aiStatus(){try{const d=await api('/api/ai/config');const who=[d.google_configured?`Google (${d.google_model})`:null,d.openrouter_configured?`OpenRouter (${d.openrouter_model})`:null].filter(Boolean).join(' → fallback ');text('#aiProvider',who||'No API key set — press “API keys”.');$('#aiSend').disabled=!d.available}catch(e){text('#aiProvider',`Provider check failed: ${e.message}`)}}
+function aiAppend(cls,txt){const el=document.createElement('div');el.className=`ai-msg ${cls}`;el.textContent=txt;$('#aiLog').append(el);$('#aiLog').scrollTop=$('#aiLog').scrollHeight;return el}
+function aiSteps(steps){if(!steps||!steps.length)return;const ul=document.createElement('ul');ul.className='ai-steps';steps.forEach(s=>{const li=document.createElement('li');const a=s.args&&Object.keys(s.args).length?` ${JSON.stringify(s.args)}`:'';li.textContent=`${s.error?'✗':'✓'} ${s.tool}${a}${s.error?` — ${s.error}`:''}`;if(s.error)li.className='bad';ul.append(li)});$('#aiLog').append(ul);$('#aiLog').scrollTop=$('#aiLog').scrollHeight}
+if($('#aiForm'))$('#aiForm').onsubmit=async e=>{
+  e.preventDefault();
+  const q=$('#aiPrompt').value.trim();if(!q)return;
+  $('#aiPrompt').value='';aiAppend('you',q);
+  const pending=aiAppend('bot','…');$('#aiForm').classList.add('ai-busy');$('#aiSend').disabled=true;
+  try{
+    const d=await control('/api/ai',{prompt:q});
+    pending.textContent=d.reply;aiSteps(d.steps);
+    if(d.fallback_reason)aiAppend('err',`Fell back: ${d.fallback_reason}`);
+    log(`Assistant (${d.provider}/${d.model}) ran ${d.steps.length} tool call(s)`,'INFO','AI');
+    refresh();
+  }catch(err){pending.remove();aiAppend('err',err.message)}
+  finally{$('#aiForm').classList.remove('ai-busy');$('#aiSend').disabled=false}
+};
+if($('#aiKeys'))$('#aiKeys').onclick=async()=>{
+  const g=prompt('Google AI (Gemini) API key — leave blank to keep, type "-" to clear');
+  if(g===null)return;
+  const o=prompt('OpenRouter API key (fallback) — leave blank to keep, type "-" to clear');
+  if(o===null)return;
+  const body={};
+  if(g!=='')body.google_api_key=g==='-'?'':g;
+  if(o!=='')body.openrouter_api_key=o==='-'?'':o;
+  try{await control('/api/ai/config',body);log('AI provider keys updated','INFO','AI')}catch(e){log(`AI keys: ${e.message}`,'WARN','AI')}
+  aiStatus();
+};
+setTimeout(aiStatus,1200);
