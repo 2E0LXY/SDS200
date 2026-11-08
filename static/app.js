@@ -5,6 +5,7 @@ const clientId = localStorage.sdsClientId || (localStorage.sdsClientId = crypto.
 let lease = false, stateCache = {}, fqk = Array(100).fill(0), config = {}, capabilities = {};
 let waterfallTimer = null, waterfallRunning = false, lastWfTimestamp = 0, lastSelectedHost = '', activePage = 0, fqkEditMode = false;
 let memoryStack = [];
+let menuState={in_menu:false,items:[],title:'',menu_type:''};
 
 function headers(control=false){const h={'Content-Type':'application/json'};if(control){h['X-Client-Id']=clientId;const t=$('#token').value||localStorage.sdsToken||'';if(t)h['X-Control-Token']=t;}return h}
 async function api(path, opts={}){const r=await fetch(path,opts);let data;try{data=await r.json()}catch{data={detail:await r.text()}}if(!r.ok)throw new Error(data.detail||`${r.status}`);return data}
@@ -205,7 +206,11 @@ $('#acquireLease').onclick=acquire;$('#releaseLease').onclick=async()=>{try{awai
 function updateDashSoftKeys(lines){const raw=[...(lines||[])].reverse().map(x=>String(x.text||'').trim()).find(Boolean)||'';const parts=raw.split(/\s{2,}/).map(x=>x.trim()).filter(Boolean);const labels=parts.length>=3?parts.slice(-3):['SOFT 1','SOFT 2','SOFT 3'];text('#dashSoftA',labels[0]);text('#dashSoftB',labels[1]);text('#dashSoftC',labels[2])}
 function renderDisplay(d){
   const box=$('#remoteDisplay');if(!box||!d)return d;box.innerHTML='';box.dataset.form=d.display_form||'';
-  for(const line of (d.lines||[])){const div=document.createElement('div');div.className='lcd-line';div.classList.add(line.font==='large'?'large':'small');if(String(line.mode||'').includes('*'))div.classList.add('reverse');if(String(line.mode||'').includes('_'))div.classList.add('underline');div.textContent=(line.text??'')||' ';box.appendChild(div)}
+  for(const line of (d.lines||[])){const div=document.createElement('div');div.className='lcd-line';div.classList.add(line.font==='large'?'large':'small');if(String(line.mode||'').includes('*'))div.classList.add('reverse');if(String(line.mode||'').includes('_'))div.classList.add('underline');div.textContent=(line.text??'')||' ';
+    // In a menu every listed item is a target: clicking the line opens it.
+    const label=String(line.text||'').trim();
+    if(menuState.in_menu&&label&&menuItemFor(label)){div.classList.add('clickable');div.title=`Open \u201c${label}\u201d`;div.onclick=()=>menuSelect({name:label})}
+    box.appendChild(div)}
   if(!(d.lines||[]).length)box.innerHTML='<div class="empty">No STS display lines returned.</div>';$('#displayRaw').textContent=JSON.stringify(d,null,2);updateDashSoftKeys(d.lines||[]);return d;
 }
 async function readDisplay(){try{return renderDisplay(await api('/api/display'))}catch(e){log(`STS: ${e.message}`,'ERROR','STS')}}
@@ -313,3 +318,38 @@ async function lookupAddress(send){
 }
 if($('#addrLookup'))$('#addrLookup').onclick=()=>lookupAddress(false);
 if($('#addrSet'))$('#addrSet').onclick=()=>lookupAddress(true);
+
+// ---- Clickable scanner menus (MSI lists the items, MSV,,<index> opens one) ----
+function menuNorm(s){return String(s||'').trim().split(':')[0].toLowerCase().split(/\s+/).join(' ')}
+function menuItemFor(label){const n=menuNorm(label);if(!n)return null;return (menuState.items||[]).find(it=>{const m=menuNorm(it.name);return m===n||m.startsWith(n)||n.startsWith(m)})||null}
+function applyMenuState(d){
+  menuState={in_menu:!!d.in_menu,items:d.items||[],title:d.title||'',menu_type:d.menu_type||''};
+  const bar=$('#menuBar');
+  if(bar){
+    bar.hidden=!menuState.in_menu;
+    const typing=menuState.menu_type==='TypeInput'||menuState.menu_type==='TypeLocation';
+    text('#menuTitle',menuState.in_menu?`${menuState.title}${typing?' — click the highlighted line to type a value':''}`:'');
+  }
+  if(d.display)renderDisplay(d.display);
+  return d;
+}
+async function menuRefresh(){try{const d=await api('/api/menu/state');applyMenuState(d)}catch(e){}}
+async function menuSelect(body){
+  try{
+    if((menuState.menu_type==='TypeInput'||menuState.menu_type==='TypeLocation')&&!body.value){
+      const v=prompt(`${menuState.title}\nEnter the value:`);
+      if(v===null)return;
+      body={value:v};
+    }
+    const d=await control('/api/menu/select',body);
+    applyMenuState(d);
+    log(`Menu: ${body.name||body.value||body.index}`,'INFO','CONTROL');
+    if(!d.in_menu)refresh();
+  }catch(e){log(`Menu: ${e.message}`,'WARN','CONTROL')}
+}
+async function menuBack(exit){try{const d=await control('/api/menu/back',{exit:!!exit});applyMenuState(d);if(!d.in_menu){await readDisplay();refresh()}}catch(e){log(`Menu: ${e.message}`,'WARN','CONTROL')}}
+if($('#menuBack2'))$('#menuBack2').onclick=()=>menuBack(false);
+if($('#menuExit'))$('#menuExit').onclick=()=>menuBack(true);
+if($('#menuEnterTop'))$('#menuEnterTop').onclick=async()=>{try{const d=await control('/api/control/key',{key:'M'});if(d.display)renderDisplay(d.display);await menuRefresh()}catch(e){log(`Menu: ${e.message}`,'WARN','CONTROL')}};
+setInterval(()=>{if(activePage===2)menuRefresh()},2500);
+setTimeout(menuRefresh,1500);

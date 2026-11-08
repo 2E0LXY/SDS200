@@ -602,7 +602,7 @@ func (a *App) aiTools() []AITool {
 		},
 		{
 			Name:        "set_menu_value",
-			Description: "Set the value of the menu item currently selected: the index of an option for a selection menu, or the text for an input menu. Read the menu first.",
+			Description: "Open or set a menu item: the item's index for a selection menu (read_menu lists them), or the text for an input menu. Read the menu first.",
 			Parameters:  schema(map[string]any{"value": strProp("Option index, or text to enter")}, "value"),
 			Writes:      true,
 			Run: func(args map[string]any) (any, error) {

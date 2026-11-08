@@ -291,3 +291,16 @@ func TestServiceTypeMatching(t *testing.T) {
 		t.Fatalf("unknown name should list the real ones, got %v", err)
 	}
 }
+
+func TestNormaliseMenuText(t *testing.T) {
+	cases := map[string]string{
+		"  Set Scan Selection ":        "set scan selection",
+		"Aircraft                :---": "aircraft",
+		"Srch/CloCall Opt":             "srch/clocall opt",
+	}
+	for in, want := range cases {
+		if got := normaliseMenuText(in); got != want {
+			t.Fatalf("%q -> %q want %q", in, got, want)
+		}
+	}
+}

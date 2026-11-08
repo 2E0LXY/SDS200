@@ -140,7 +140,8 @@
       <div class="rotary"><button data-key="<">◀</button><button data-key="^" class="knob"><span>ROTATE</span><b>SELECT</b></button><button data-key=">">▶</button></div>
     </div>
     <div class="card remote-display-card">
-      <div class="card-head"><div><h2>Scanner Entry / Confirmation</h2><p>Real STS readback after every control key. This confirms what the physical scanner actually accepted, including frequency-entry prompts and menu context.</p></div><button id="refreshDisplay">Refresh</button></div>
+      <div class="card-head"><div><h2>Scanner Entry / Confirmation</h2><p>Real STS readback after every control key. In a menu, click any line to open it.</p></div><div class="action-row"><button id="menuEnterTop">Menu</button><button id="refreshDisplay">Refresh</button></div></div>
+      <div id="menuBar" class="menu-bar" hidden><span id="menuTitle" class="menu-title"></span><div class="action-row"><button id="menuBack2">Back</button><button id="menuExit">Exit menu</button></div></div>
       <div id="remoteDisplay" class="remote-display"><div class="empty">Waiting for scanner display…</div></div>
     </div>
     <div class="control-layout">

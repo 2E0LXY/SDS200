@@ -1552,3 +1552,157 @@ func (a *App) apiGeocode(w http.ResponseWriter, r *http.Request) {
 	a.log.Info("GEOCODE", "Address resolved", map[string]any{"source": res.Source, "precision": res.Precision, "label": res.Label})
 	writeJSON(w, 200, res)
 }
+
+// ------------------------------------------------------------ menu control
+
+// menuItems reads the menu currently on screen and returns its title, type and
+// items. MenuType is TypeSelect, TypeInput, TypeLocation or TypeError (not in
+// a menu).
+func (a *App) menuItems() (title, menuType string, items []map[string]string, err error) {
+	res, e := a.command("MSI", 2500*time.Millisecond)
+	if e != nil {
+		return "", "", nil, e
+	}
+	d, e := xmlRecords(res.Raw)
+	if e != nil {
+		return "", "", nil, e
+	}
+	attrs, _ := d["root_attributes"].(map[string]string)
+	title, menuType = attrs["Name"], attrs["MenuType"]
+	recs, _ := d["records"].([]map[string]any)
+	for _, r := range recs {
+		if fmt.Sprint(r["tag"]) != "MenuItem" {
+			continue
+		}
+		items = append(items, map[string]string{"name": fmt.Sprint(r["Name"]), "index": fmt.Sprint(r["Index"]), "value": fmt.Sprint(r["Value"])})
+	}
+	return title, menuType, items, nil
+}
+
+func (a *App) apiMenuState(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, "GET") {
+		return
+	}
+	title, mt, items, err := a.menuItems()
+	if err != nil {
+		errJSON(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"title": strings.TrimSpace(title), "menu_type": mt, "in_menu": mt != "" && mt != "TypeError", "items": items})
+}
+
+// apiMenuSelect opens a menu item by index or by the name shown on screen.
+// MSV,,<index> navigates into the item (verified on fw 1.23.15).
+func (a *App) apiMenuSelect(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, "POST") {
+		return
+	}
+	if err := a.requireControl(r); err != nil {
+		errJSON(w, err)
+		return
+	}
+	var b struct {
+		Index *int   `json:"index"`
+		Name  string `json:"name"`
+		Value string `json:"value"`
+	}
+	if err := readJSON(r, &b); err != nil {
+		errJSON(w, err)
+		return
+	}
+	title, mt, items, err := a.menuItems()
+	if err != nil {
+		errJSON(w, err)
+		return
+	}
+	if mt == "" || mt == "TypeError" {
+		errJSON(w, &httpError{409, "the scanner is not in a menu"})
+		return
+	}
+	value := ""
+	switch {
+	case b.Value != "":
+		// Text for an input menu (latitude, a name, a frequency...).
+		value = b.Value
+	case b.Index != nil:
+		value = strconv.Itoa(*b.Index)
+	case b.Name != "":
+		want := normaliseMenuText(b.Name)
+		for _, it := range items {
+			n := normaliseMenuText(it["name"])
+			if n == want || (want != "" && strings.HasPrefix(n, want)) {
+				value = it["index"]
+				break
+			}
+		}
+		if value == "" {
+			errJSON(w, &httpError{404, fmt.Sprintf("%q is not an item in %q", b.Name, strings.TrimSpace(title))})
+			return
+		}
+	default:
+		errJSON(w, &httpError{422, "index, name or value is required"})
+		return
+	}
+	a.log.Info("CONTROL", "Menu select", map[string]any{"menu": strings.TrimSpace(title), "value": value})
+	if _, err := a.execWrite("MSV,,"+strings.ReplaceAll(value, ",", "\t"), 2500*time.Millisecond); err != nil {
+		errJSON(w, err)
+		return
+	}
+	a.invalidateState()
+	time.Sleep(350 * time.Millisecond)
+	a.writeMenuSnapshot(w)
+}
+
+// apiMenuBack leaves one menu level, or menu mode entirely.
+func (a *App) apiMenuBack(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, "POST") {
+		return
+	}
+	if err := a.requireControl(r); err != nil {
+		errJSON(w, err)
+		return
+	}
+	var b struct {
+		Exit bool `json:"exit"`
+	}
+	if err := readJSON(r, &b); err != nil {
+		errJSON(w, err)
+		return
+	}
+	level := ""
+	if b.Exit {
+		level = "RETURN_PREVOUS_MODE"
+	}
+	if _, err := a.execWrite("MSB,,"+level, 2500*time.Millisecond); err != nil {
+		errJSON(w, err)
+		return
+	}
+	a.invalidateState()
+	time.Sleep(350 * time.Millisecond)
+	a.writeMenuSnapshot(w)
+}
+
+// writeMenuSnapshot returns the menu (if still in one) plus the screen.
+func (a *App) writeMenuSnapshot(w http.ResponseWriter) {
+	out := map[string]any{}
+	if title, mt, items, err := a.menuItems(); err == nil {
+		out["title"] = strings.TrimSpace(title)
+		out["menu_type"] = mt
+		out["in_menu"] = mt != "" && mt != "TypeError"
+		out["items"] = items
+	}
+	if res, err := a.command("STS", 1500*time.Millisecond); err == nil {
+		out["display"] = parseSTS(res.Raw, res.ElapsedMS)
+	}
+	writeJSON(w, 200, out)
+}
+
+// normaliseMenuText makes on-screen text comparable: the display pads and may
+// truncate names, and some carry a trailing value such as "Aircraft  :---".
+func normaliseMenuText(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, ":"); i > 0 {
+		s = s[:i]
+	}
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}
