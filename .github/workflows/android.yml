@@ -52,7 +52,12 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
+      # Provide Gradle from the action's own (cached, retried) download rather
+      # than the wrapper: the wrapper's fetch from the GitHub release CDN has
+      # returned 504 and timed out on the runner.
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
 
       - name: Version
         run: |
@@ -70,9 +75,7 @@ jobs:
           SDS200_KEYSTORE_PASSWORD: ${{ secrets.SDS200_KEYSTORE_PASSWORD }}
           SDS200_KEY_ALIAS: ${{ secrets.SDS200_KEY_ALIAS }}
           SDS200_KEY_PASSWORD: ${{ secrets.SDS200_KEY_PASSWORD }}
-        run: |
-          chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace testDebugUnitTest lint assembleRelease
+        run: gradle --no-daemon --stacktrace testDebugUnitTest lint assembleRelease
 
       - name: Checksums
         run: |
