@@ -234,3 +234,60 @@ func toStrings(v any) []string {
 	}
 	return out
 }
+
+func TestServiceTypeMatching(t *testing.T) {
+	all := []serviceType{}
+	for i := 0; i < 47; i++ {
+		name := ""
+		if i < 37 {
+			name = presetServiceTypes[i]
+		} else {
+			name = "Custom " + string(rune('0'+i-36))
+		}
+		all = append(all, serviceType{Slot: i, Name: name})
+	}
+	nameOf := func(idx []int) []string {
+		out := []string{}
+		for _, i := range idx {
+			out = append(out, all[i].Name)
+		}
+		return out
+	}
+	cases := map[string][]string{
+		"Fire Dispatch":     {"Fire Dispatch"},
+		"fire dispatch":     {"Fire Dispatch"},
+		"Civilian Aircraft": {"Aircraft"},
+		"airband":           {"Aircraft"},
+		"police":            {"Law Dispatch", "Law Tac", "Law Talk"},
+		"ambulance":         {"EMS Dispatch", "EMS-Tac", "EMS-Talk"},
+		"railway":           {"Railroad"},
+		"council":           {"Public Works"},
+	}
+	for in, want := range cases {
+		idx, err := matchServiceTypes(in, all)
+		if err != nil {
+			t.Fatalf("%q: %v", in, err)
+		}
+		got := nameOf(idx)
+		if len(got) != len(want) {
+			t.Fatalf("%q: got %v want %v", in, got, want)
+		}
+		for _, w := range want {
+			found := false
+			for _, g := range got {
+				if g == w {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("%q: got %v want %v", in, got, want)
+			}
+		}
+	}
+	if idx, err := matchServiceTypes("fire", all); err != nil || len(idx) != 3 {
+		t.Fatalf("partial match: %v %v", idx, err)
+	}
+	if _, err := matchServiceTypes("submarines", all); err == nil || !strings.Contains(err.Error(), "Aircraft") {
+		t.Fatalf("unknown name should list the real ones, got %v", err)
+	}
+}

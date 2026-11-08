@@ -95,7 +95,7 @@ function memoryMeta(r){return [r.tag,r.Type,r.SystemType,r.Freq,r.Mod,r.TGID,r.S
 function setMemoryRows(records,onClick){const out=$('#memoryList');out.innerHTML='';if(!records.length){out.innerHTML='<div class="empty">No entries returned at this memory level.</div>';return}records.forEach(r=>{const el=document.createElement('div');el.className='list-row memory-row'+(onClick?'':' terminal');el.innerHTML=`<span class="led"></span><div><strong>${escapeHtml(memoryLabel(r))}</strong><div class="meta">${escapeHtml(memoryMeta(r))}</div></div><span>${escapeHtml(r.Index??'')}</span>`;if(onClick)el.onclick=()=>onClick(r);out.appendChild(el)})}
 function memoryCrumbs(){text('#memoryBreadcrumb',memoryStack.map(x=>x.title).join(' › ')||'Favorites')}
 async function memoryFetch(kind,parent=''){const q=new URLSearchParams({kind});if(parent!==''&&parent!==null)q.set('parent',parent);return api(`/api/memory?${q}`)}
-async function memoryShow(step,push=true){try{if(push){if(!memoryStack.length&&step.kind!=='FL')memoryStack=[{type:'level',kind:'FL',title:'Favorites'}];memoryStack.push(step)}memoryCrumbs();if(step.type==='level'){const d=await memoryFetch(step.kind,step.parent||'');const rec=d.records||[];if(step.kind==='FL')setMemoryRows(rec,r=>memoryShow({type:'level',kind:'SYS',parent:String(r.Index),title:r.Name||'Favorite'}));else if(step.kind==='SYS')setMemoryRows(rec,r=>memoryShow({type:'system',index:String(r.Index),title:r.Name||'System'}));else if(step.kind==='SFREQ')setMemoryRows(rec,null);else setMemoryRows(rec,null)}else if(step.type==='system'){const [deps,sites]=await Promise.all([memoryFetch('DEPT',step.index),memoryFetch('SITE',step.index)]);const rows=[...(deps.records||[]).map(x=>({...x,_branch:'dept'})),...(sites.records||[]).map(x=>({...x,_branch:'site'}))];setMemoryRows(rows,r=>r._branch==='dept'?memoryShow({type:'department',index:String(r.Index),title:r.Name||'Department'}):memoryShow({type:'level',kind:'SFREQ',parent:String(r.Index),title:r.Name||'Site'}))}else if(step.type==='department'){const [cf,tg]=await Promise.all([memoryFetch('CFREQ',step.index),memoryFetch('TGID',step.index)]);setMemoryRows([...(cf.records||[]),...(tg.records||[])],null)}}catch(e){log(`Memory: ${e.message}`);$('#memoryList').innerHTML=`<div class="empty">${escapeHtml(e.message)}</div>`}}
+async function memoryShow(step,push=true){try{if(push){if(!memoryStack.length&&step.kind!=='FL')memoryStack=[{type:'level',kind:'FL',title:'Favorites'}];memoryStack.push(step)}memoryCrumbs();if(step.type==='level'){const d=await memoryFetch(step.kind,step.parent||'');const rec=d.records||[];if(step.kind==='FL')setMemoryRows(rec,r=>memoryShow({type:'level',kind:'SYS',parent:String(r.Index),title:r.Name||'Favorite'}));else if(step.kind==='SYS')setMemoryRows(rec,r=>memoryShow({type:'system',index:String(r.Index),title:r.Name||'System'}));else if(step.kind==='SFREQ')setMemoryRows(rec,null);else setMemoryRows(rec,null)}else if(step.type==='system'){const [deps,sites]=await Promise.all([memoryFetch('DEPT',step.index),memoryFetch('SITE',step.index)]);const rows=[...(deps.records||[]).map(x=>({...x,_branch:'dept'})),...(sites.records||[]).map(x=>({...x,_branch:'site'}))];setMemoryRows(rows,r=>r._branch==='dept'?memoryShow({type:'department',index:String(r.Index),title:r.Name||'Department'}):memoryShow({type:'level',kind:'SFREQ',parent:String(r.Index),title:r.Name||'Site'}))}else if(step.type==='department'){const [cf,tg]=await Promise.all([memoryFetch('CFREQ',step.index),memoryFetch('TGID',step.index)]);setMemoryRows([...(cf.records||[]).map(x=>({...x,_goto:'CFREQ'})),...(tg.records||[]).map(x=>({...x,_goto:'TGID'}))],r=>memoryGoto(r._goto,r))}}catch(e){log(`Memory: ${e.message}`);$('#memoryList').innerHTML=`<div class="empty">${escapeHtml(e.message)}</div>`}}
 async function memoryHome(){memoryStack=[];const step={type:'level',kind:'FL',title:'Favorites'};memoryStack=[step];await memoryShow(step,false)}
 $('#memoryHome').onclick=memoryHome;
 $('#memoryBack').onclick=async()=>{if(memoryStack.length<=1){await memoryHome();return}memoryStack.pop();const step=memoryStack[memoryStack.length-1];await memoryShow(step,false)};
@@ -279,3 +279,37 @@ if($('#aiKeys'))$('#aiKeys').onclick=async()=>{
   aiStatus();
 };
 setTimeout(aiStatus,1200);
+
+// ---- Clicking a programmed channel tunes the scanner to it (HLD,<kind>,<index>) ----
+async function memoryGoto(kind,rec){
+  const idx=rec.Index;
+  if(idx===undefined||idx===null){log('That item has no index to select','WARN','MEMORY');return}
+  const name=rec.Name||`${kind} ${idx}`;
+  try{
+    const d=await control('/api/memory/goto',{kind,index:String(idx)});
+    const st=d.state||{};
+    log(d.changed?`Tuned to ${name} (${formatDisplayFrequency(st.frequency)})`:`Already on ${name}`,'INFO','MEMORY');
+    render(st);
+  }catch(e){log(`Go to ${name}: ${e.message}`,'WARN','MEMORY')}
+}
+// ---- Set the scanner's location from a postcode ----
+async function lookupAddress(send){
+  const house=$('#addrHouse').value.trim(), postcode=$('#addrPostcode').value.trim();
+  if(!postcode){text('#addrResult','Enter a postcode.');return}
+  try{
+    if(!send){
+      const g=await api(`/api/geocode?${new URLSearchParams({house,postcode})}`);
+      text('#addrResult',`${g.label} — ${g.latitude.toFixed(5)}, ${g.longitude.toFixed(5)} (${g.precision}, ${g.source})`);
+      return;
+    }
+    const body={house,postcode};
+    const r=Number($('#addrRange').value);
+    if(Number.isFinite(r)&&r>0)body.range=r;
+    const d=await control('/api/location',body);
+    const g=d.resolved||{};
+    text('#addrResult',`Scanner set to ${g.label||postcode} — ${g.latitude?.toFixed(5)}, ${g.longitude?.toFixed(5)}`);
+    log(`Scanner location set from ${postcode}`,'INFO','CONTROL');
+  }catch(e){text('#addrResult',e.message)}
+}
+if($('#addrLookup'))$('#addrLookup').onclick=()=>lookupAddress(false);
+if($('#addrSet'))$('#addrSet').onclick=()=>lookupAddress(true);

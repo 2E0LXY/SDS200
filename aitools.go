@@ -6,24 +6,35 @@ package main
 // the model can read and explain.
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
 
-const aiSystemPrompt = `You control a Uniden SDS200E scanner (firmware 1.23.15) on the operator's local network, through the tools provided. You are talking to a licensed UK amateur radio operator.
+const aiSystemPrompt = `You control a Uniden SDS200E scanner (firmware 1.23.15) on the operator's local network, through the tools provided. You are talking to a licensed UK amateur radio operator (callsign 2E0LXY), so use UK terms and British English.
 
 Rules:
 - Use the tools for anything about the scanner's current state; never guess what it is doing.
 - Read the state first when a request depends on it (which channel, which system, what mode).
 - Volume is 0-29, squelch 0-19. Frequencies are given in MHz by the operator; tools take MHz unless stated.
 - Holds toggle a specific item: hold the channel to stay on it, release to resume scanning.
-- The SDS200 has no Service, Range or Squelch-push key. Service Types is func_key with key "Z"; range is set with set_range.
+- To go to a named channel, call browse_memory to find it, then go_to_channel with its index.
+- The SDS200 has no Service, Range or Squelch-push key. Service Types is func_key with key "Z"; range is set with set_range or set_location_from_address.
 - Long presses cannot be sent over the network, so the three-second functions (global attenuator, weather mode, colour mode) are unavailable; say so if asked.
 - Waterfall and analyse modes take the radio out of normal scanning. Say what you are about to do, do it, then report what the scanner shows.
 - Programming favourites (new systems, departments, channels) needs the microSD card and is not available through these tools yet. Custom search ranges and quick keys are.
-- Keep answers short and factual, in British English. Give frequencies as 453.7250 MHz. If a tool fails, say what failed and what the scanner reported.`
+- Keep answers short and factual. Give frequencies as 453.7250 MHz. If a tool fails, say what failed and what the scanner reported.
+
+Interpreting the operator:
+- "Airband", "aircraft", "ATC" mean the Aircraft service type; civil airband is 118-137 MHz AM, military 225-400 MHz AM.
+- "Blue light" means police, fire and ambulance together. In the UK these are mostly encrypted TETRA, so the scanner will hear little; say so rather than pretending.
+- "PMR446" is 446.00625-446.19375 MHz NFM; "marine" is 156-162 MHz; "2 metres" is 144-146 MHz and "70 centimetres" 430-440 MHz in the UK.
+- Service-type names need not be exact: set_service_types understands everyday words and switches every matching type.
+- "Scan range" (set_range) is how far from the scanner's location the database is used; it is not a frequency range. A frequency range to sweep is a custom search.
+- An address or postcode means set_location_from_address; the operator rarely knows the coordinates.`
 
 // aiTools builds the tool set bound to this App.
 func (a *App) aiTools() []AITool {
@@ -240,10 +251,10 @@ func (a *App) aiTools() []AITool {
 		},
 		{
 			Name:        "set_service_types",
-			Description: "Turn service types on or off by name, e.g. enable ['Fire Dispatch','EMS Dispatch'] or disable ['Aircraft']. Names must match get_service_types.",
+			Description: "Turn service types on or off. Everyday words work: aircraft/airband, police/law, fire, ambulance/EMS, rail, military, ham, utilities, council, media, schools, security, hospital, business, transport, federal, corrections, interop, emergency ops, other, or 'custom 1'-'custom 10'. A word that covers several types (police, fire, EMS) switches all of them.",
 			Parameters: schema(map[string]any{
-				"enable":  map[string]any{"type": "array", "description": "Service type names to switch on", "items": map[string]any{"type": "string"}},
-				"disable": map[string]any{"type": "array", "description": "Service type names to switch off", "items": map[string]any{"type": "string"}},
+				"enable":  map[string]any{"type": "array", "description": "Service types to switch on", "items": map[string]any{"type": "string"}},
+				"disable": map[string]any{"type": "array", "description": "Service types to switch off", "items": map[string]any{"type": "string"}},
 			}),
 			Writes: true,
 			Run: func(args map[string]any) (any, error) {
@@ -252,37 +263,47 @@ func (a *App) aiTools() []AITool {
 					return nil, err
 				}
 				states := make([]int, 47)
-				byName := map[string]int{}
 				for i, it := range cur {
 					if it.Enabled {
 						states[i] = 1
 					}
-					if it.Name != "" {
-						byName[strings.ToLower(it.Name)] = i
-					}
 				}
-				apply := func(key string, on int) error {
+				changed := map[string][]string{"enabled": {}, "disabled": {}}
+				apply := func(key string, on int, bucket string) error {
 					list, _ := args[key].([]any)
 					for _, v := range list {
-						n := strings.ToLower(strings.TrimSpace(fmt.Sprint(v)))
-						idx, ok := byName[n]
-						if !ok {
-							return fmt.Errorf("no service type called %q", v)
+						want := fmt.Sprint(v)
+						idxs, err := matchServiceTypes(want, cur)
+						if err != nil {
+							return err
 						}
-						states[idx] = on
+						for _, i := range idxs {
+							states[i] = on
+							changed[bucket] = append(changed[bucket], cur[i].Name)
+						}
 					}
 					return nil
 				}
-				if err := apply("enable", 1); err != nil {
+				if err := apply("enable", 1, "enabled"); err != nil {
 					return nil, err
 				}
-				if err := apply("disable", 0); err != nil {
+				if err := apply("disable", 0, "disabled"); err != nil {
 					return nil, err
 				}
 				if _, err := a.execWrite("SVC,"+joinInts(states), 2*time.Second); err != nil {
 					return nil, err
 				}
-				return a.serviceTypes()
+				after, err := a.serviceTypes()
+				if err != nil {
+					return nil, err
+				}
+				on := []string{}
+				for _, it := range after {
+					if it.Enabled {
+						on = append(on, it.Name)
+					}
+				}
+				return map[string]any{"enabled": changed["enabled"], "disabled": changed["disabled"], "now_scanning": on}, nil
 			},
 		},
 		{
@@ -409,6 +430,52 @@ func (a *App) aiTools() []AITool {
 					return nil, err
 				}
 				return map[string]any{"latitude": lat, "longitude": lon, "range_miles": rng}, nil
+			},
+		},
+		{
+			Name:        "go_to_channel",
+			Description: "Jump straight to a programmed item and hold it. Use browse_memory first to get the index. Kind is CFREQ (conventional channel), TGID (talkgroup), DEPT, SITE or SYS.",
+			Parameters:  schema(map[string]any{"kind": strProp("Item kind", "CFREQ", "TGID", "DEPT", "SITE", "SYS"), "index": strProp("The item's index from browse_memory")}, "kind", "index"),
+			Writes:      true,
+			Run: func(args map[string]any) (any, error) {
+				kind := strings.ToUpper(argString(args, "kind"))
+				idx := argString(args, "index")
+				if !map[string]bool{"CFREQ": true, "TGID": true, "DEPT": true, "SITE": true, "SYS": true}[kind] || idx == "" {
+					return nil, fmt.Errorf("kind must be CFREQ, TGID, DEPT, SITE or SYS, with an index")
+				}
+				if _, err := a.execWrite(fmt.Sprintf("HLD,%s,%s,", kind, idx), 2*time.Second); err != nil {
+					return nil, err
+				}
+				a.invalidateState()
+				time.Sleep(500 * time.Millisecond)
+				return a.readState(true), nil
+			},
+		},
+		{
+			Name:        "set_location_from_address",
+			Description: "Set the scanner's location from a UK postcode, optionally with a house number for a more exact position, and optionally the scan range in miles. Use this when the operator gives an address rather than coordinates.",
+			Parameters:  schema(map[string]any{"postcode": strProp("UK postcode, e.g. WF3 1AB"), "house_number": strProp("Optional house number or name"), "range_miles": numProp("Optional scan range in miles, 0-999")}, "postcode"),
+			Writes:      true,
+			Run: func(args map[string]any) (any, error) {
+				geo, err := newGeocoder(a.log).Lookup(context.Background(), argString(args, "house_number"), argString(args, "postcode"))
+				if err != nil {
+					return nil, err
+				}
+				_, _, rng, err := a.location()
+				if err != nil {
+					return nil, err
+				}
+				if v, ok := argFloat(args, "range_miles"); ok {
+					if v < 0 || v > 999 {
+						return nil, fmt.Errorf("range must be 0-999 miles")
+					}
+					rng = v
+				}
+				wire := fmt.Sprintf("LCR,%.6f,%.6f,%.1f", geo.Latitude, geo.Longitude, rng)
+				if _, err := a.execWrite(wire, 2*time.Second); err != nil {
+					return nil, err
+				}
+				return map[string]any{"latitude": geo.Latitude, "longitude": geo.Longitude, "range_miles": rng, "matched": geo.Label, "precision": geo.Precision, "source": geo.Source}, nil
 			},
 		},
 		{
@@ -735,4 +802,104 @@ func (a *App) setHoldState(scope string, want bool) (map[string]any, error) {
 			return nil, fmt.Errorf("%s hold unchanged — scanner still %s", scope, state)
 		}
 	}
+}
+
+// serviceTypeAliases maps everyday words to the scanner's service-type names.
+// A word may cover several types: "police" switches all three Law types.
+var serviceTypeAliases = map[string][]string{
+	"aircraft": {"Aircraft"}, "air": {"Aircraft"}, "airband": {"Aircraft"}, "aviation": {"Aircraft"},
+	"atc": {"Aircraft"}, "civilian aircraft": {"Aircraft"}, "military aircraft": {"Aircraft", "Military"},
+	"police": {"Law Dispatch", "Law Tac", "Law Talk"}, "law": {"Law Dispatch", "Law Tac", "Law Talk"},
+	"law enforcement": {"Law Dispatch", "Law Tac", "Law Talk"},
+	"fire":            {"Fire Dispatch", "Fire-Tac", "Fire-Talk"}, "fire brigade": {"Fire Dispatch", "Fire-Tac", "Fire-Talk"},
+	"fire service": {"Fire Dispatch", "Fire-Tac", "Fire-Talk"},
+	"ems":          {"EMS Dispatch", "EMS-Tac", "EMS-Talk"}, "ambulance": {"EMS Dispatch", "EMS-Tac", "EMS-Talk"},
+	"medical": {"EMS Dispatch", "EMS-Tac", "EMS-Talk", "Hospital"}, "paramedic": {"EMS Dispatch", "EMS-Tac", "EMS-Talk"},
+	"blue light":         {"Law Dispatch", "Law Tac", "Law Talk", "Fire Dispatch", "Fire-Tac", "Fire-Talk", "EMS Dispatch", "EMS-Tac", "EMS-Talk"},
+	"emergency services": {"Law Dispatch", "Law Tac", "Law Talk", "Fire Dispatch", "Fire-Tac", "Fire-Talk", "EMS Dispatch", "EMS-Tac", "EMS-Talk"},
+	"dispatch":           {"Multi-Dispatch", "Law Dispatch", "Fire Dispatch", "EMS Dispatch"},
+	"rail":               {"Railroad"}, "railway": {"Railroad"}, "train": {"Railroad"}, "trains": {"Railroad"},
+	"military": {"Military"}, "mod": {"Military"}, "army": {"Military"}, "raf": {"Military"}, "navy": {"Military"},
+	"ham": {"Ham"}, "amateur": {"Ham"}, "amateur radio": {"Ham"}, "repeaters": {"Ham"},
+	"utilities": {"Utilities"}, "power": {"Utilities"}, "water": {"Utilities"}, "gas": {"Utilities"},
+	"council": {"Public Works"}, "public works": {"Public Works"}, "highways": {"Public Works"}, "refuse": {"Public Works"},
+	"media": {"Media"}, "press": {"Media"}, "broadcast": {"Media"}, "tv": {"Media"},
+	"schools": {"Schools"}, "school": {"Schools"}, "education": {"Schools"},
+	"security": {"Security"}, "guards": {"Security"}, "doorstaff": {"Security"},
+	"hospital": {"Hospital"}, "nhs": {"Hospital", "EMS Dispatch"},
+	"business": {"Business"}, "shops": {"Business"}, "retail": {"Business"}, "industry": {"Business"},
+	"transport": {"Transportation"}, "transportation": {"Transportation"}, "bus": {"Transportation"}, "buses": {"Transportation"}, "taxi": {"Transportation"},
+	"federal": {"Federal"}, "government": {"Federal"}, "coastguard": {"Federal"},
+	"corrections": {"Corrections"}, "prison": {"Corrections"}, "prisons": {"Corrections"},
+	"interop": {"Interop"}, "interoperability": {"Interop"}, "multi-agency": {"Interop", "Multi-Dispatch", "Multi-Tac", "Multi-Talk"},
+	"emergency ops": {"Emergency Ops"}, "emergency operations": {"Emergency Ops"}, "civil defence": {"Emergency Ops"},
+	"other":      {"Other"},
+	"everything": {"*"}, "all": {"*"}, "all services": {"*"}, "all service types": {"*"},
+}
+
+func normaliseServiceName(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == ' ' || r == '-' || r == '_' || r == '/':
+			b.WriteRune(' ')
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// matchServiceTypes resolves one word to the service-type slots it refers to.
+// Exact names, aliases and partial names all work; anything else returns an
+// error listing the names the scanner actually has, so the caller can retry.
+func matchServiceTypes(want string, all []serviceType) ([]int, error) {
+	n := normaliseServiceName(want)
+	if n == "" {
+		return nil, fmt.Errorf("empty service type name")
+	}
+	byNorm := map[string]int{}
+	names := make([]string, 0, len(all))
+	for i, it := range all {
+		if it.Name == "" {
+			continue
+		}
+		byNorm[normaliseServiceName(it.Name)] = i
+		names = append(names, it.Name)
+	}
+	if i, ok := byNorm[n]; ok {
+		return []int{i}, nil
+	}
+	if targets, ok := serviceTypeAliases[n]; ok {
+		if len(targets) == 1 && targets[0] == "*" {
+			idx := make([]int, 0, len(all))
+			for i, it := range all {
+				if it.Name != "" {
+					idx = append(idx, i)
+				}
+			}
+			return idx, nil
+		}
+		idx := []int{}
+		for _, t := range targets {
+			if i, ok := byNorm[normaliseServiceName(t)]; ok {
+				idx = append(idx, i)
+			}
+		}
+		if len(idx) > 0 {
+			return idx, nil
+		}
+	}
+	// Partial match: "law" -> every Law type, "fire dispatch" -> that one.
+	idx := []int{}
+	for norm, i := range byNorm {
+		if strings.Contains(norm, n) || strings.Contains(n, norm) {
+			idx = append(idx, i)
+		}
+	}
+	if len(idx) > 0 {
+		sort.Ints(idx)
+		return idx, nil
+	}
+	return nil, fmt.Errorf("the scanner has no service type matching %q. It has: %s", strings.TrimSpace(want), strings.Join(names, ", "))
 }

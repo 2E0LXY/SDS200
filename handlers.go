@@ -479,6 +479,8 @@ func (a *App) apiLocation(w http.ResponseWriter, r *http.Request) {
 			Latitude  *float64 `json:"latitude"`
 			Longitude *float64 `json:"longitude"`
 			Range     *float64 `json:"range"`
+			House     string   `json:"house"`
+			Postcode  string   `json:"postcode"`
 		}
 		if err := readJSON(r, &b); err != nil {
 			errJSON(w, err)
@@ -495,6 +497,18 @@ func (a *App) apiLocation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		lat, lon, rng := strings.TrimSpace(f[0]), strings.TrimSpace(f[1]), strings.TrimSpace(f[2])
+		// A postcode (with an optional house number) sets the position without
+		// the operator having to find coordinates.
+		var geo *GeoResult
+		if strings.TrimSpace(b.Postcode) != "" {
+			geo, err = newGeocoder(a.log).Lookup(r.Context(), b.House, b.Postcode)
+			if err != nil {
+				errJSON(w, &httpError{422, err.Error()})
+				return
+			}
+			lat = strconv.FormatFloat(geo.Latitude, 'f', 6, 64)
+			lon = strconv.FormatFloat(geo.Longitude, 'f', 6, 64)
+		}
 		if b.Latitude != nil {
 			if *b.Latitude < -90 || *b.Latitude > 90 {
 				errJSON(w, &httpError{422, "latitude out of range"})
@@ -1466,4 +1480,75 @@ func (a *App) apiAIConfig(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
 		writeJSON(w, 405, map[string]any{"detail": "method not allowed"})
 	}
+}
+
+// ------------------------------------------------------- memory: go to item
+
+// apiMemoryGoto jumps the scanner to a memory item and holds it. Verified on
+// fw 1.23.15: HLD,<tkw>,<index>, moves straight to that channel.
+func (a *App) apiMemoryGoto(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, "POST") {
+		return
+	}
+	if err := a.requireControl(r); err != nil {
+		errJSON(w, err)
+		return
+	}
+	var b struct {
+		Kind   string `json:"kind"`
+		Index  any    `json:"index"`
+		Parent any    `json:"parent"`
+	}
+	if err := readJSON(r, &b); err != nil {
+		errJSON(w, err)
+		return
+	}
+	kind := strings.ToUpper(strings.TrimSpace(b.Kind))
+	// GLT uses CFREQ/TGID for channels; HLD takes the same keywords. Site
+	// frequencies and favourites lists cannot be held (spec v2.00 p.13).
+	if !map[string]bool{"CFREQ": true, "TGID": true, "DEPT": true, "SITE": true, "SYS": true, "CCHIT": true, "WX": true, "FTO": true}[kind] {
+		errJSON(w, &httpError{422, "this kind of memory item cannot be selected directly"})
+		return
+	}
+	idx := wireValue(b.Index)
+	if idx == "" {
+		errJSON(w, &httpError{422, "index is required"})
+		return
+	}
+	before := a.readState(true)
+	// HLD toggles, so holding the item the scanner is already holding would
+	// release it. Nothing to do in that case.
+	if cur, ok := before["channel_index"].(*int); ok && cur != nil && wireValue(*cur) == idx {
+		if h := heldValue(before["channel_hold"]); h != nil && *h {
+			writeJSON(w, 200, map[string]any{"selected": true, "changed": false, "state": before})
+			return
+		}
+	}
+	wire := fmt.Sprintf("HLD,%s,%s,%s", kind, idx, wireValue(b.Parent))
+	a.log.Info("CONTROL", "Go to memory item", map[string]any{"command": wire})
+	if _, err := a.execWrite(wire, 2*time.Second); err != nil {
+		errJSON(w, err)
+		return
+	}
+	a.invalidateState()
+	time.Sleep(500 * time.Millisecond)
+	st := a.readState(true)
+	writeJSON(w, 200, map[string]any{"selected": true, "changed": true, "command": wire, "state": st})
+}
+
+// ------------------------------------------------------------- geocoding
+
+// apiGeocode turns a house number and UK postcode into coordinates.
+func (a *App) apiGeocode(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, "GET") {
+		return
+	}
+	q := r.URL.Query()
+	res, err := newGeocoder(a.log).Lookup(r.Context(), q.Get("house"), q.Get("postcode"))
+	if err != nil {
+		errJSON(w, &httpError{422, err.Error()})
+		return
+	}
+	a.log.Info("GEOCODE", "Address resolved", map[string]any{"source": res.Source, "precision": res.Precision, "label": res.Label})
+	writeJSON(w, 200, res)
 }

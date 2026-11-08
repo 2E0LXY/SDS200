@@ -38,3 +38,8 @@
 .ai-form{display:grid;grid-template-columns:1fr auto;gap:6px}
 .ai-form input{width:100%}
 .ai-busy{opacity:.6}
+
+.addr-grid{display:grid;grid-template-columns:110px 1fr 140px;gap:8px;margin:6px 0}
+.addr-grid label{display:grid;gap:3px;font-size:11px;color:#8fb6cd}
+.addr-grid input{width:100%}
+@media(max-width:700px){.addr-grid{grid-template-columns:1fr}}

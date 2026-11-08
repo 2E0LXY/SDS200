@@ -409,6 +409,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/fqk", a.apiFQK)
 	mux.HandleFunc("/api/favorites", a.apiFavorites)
 	mux.HandleFunc("/api/memory", a.apiMemory)
+	mux.HandleFunc("/api/memory/goto", a.apiMemoryGoto)
+	mux.HandleFunc("/api/geocode", a.apiGeocode)
 	mux.HandleFunc("/api/menu", a.apiMenu)
 	mux.HandleFunc("/api/service-types", a.apiServiceTypes)
 	mux.HandleFunc("/api/clock", a.apiClock)

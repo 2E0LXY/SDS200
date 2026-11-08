@@ -164,7 +164,7 @@
   <section class="page" aria-label="Scanner Memory">
     <div class="section-title"><div><span>04</span><h1>Memory</h1></div><span class="page-state">FAVORITES</span></div>
     <div class="card memory-card">
-      <div class="card-head"><div><h2>Scanner Memory Browser</h2><p>Favorites → Systems → Departments/Sites → Channels/TGIDs/Site Frequencies.</p></div><div class="action-row"><button id="memoryBack">Back</button><button id="memoryHome">Top</button></div></div>
+      <div class="card-head"><div><h2>Scanner Memory Browser</h2><p>Favorites → Systems → Departments/Sites → Channels/TGIDs/Site Frequencies. Click a channel or talkgroup to tune the scanner to it.</p></div><div class="action-row"><button id="memoryBack">Back</button><button id="memoryHome">Top</button></div></div>
       <div id="memoryBreadcrumb" class="memory-breadcrumb">Favorites</div>
       <div id="memoryList" class="list-rows"><div class="empty">Loading scanner memory…</div></div>
     </div>
@@ -255,6 +255,16 @@
     <div class="section-title"><div><span>10</span><h1>System & Diagnostics</h1></div><span class="page-state" id="diagBadge">SYSTEM</span></div>
     <div class="grid four system-cards"><div class="card"><label>Scanner</label><strong id="model">—</strong><small id="firmware">—</small></div><div class="card"><label>UDP control</label><strong id="udpDiag">—</strong><small id="scannerHost">—</small></div><div class="card"><label>RTSP audio</label><strong id="rtspDiag">—</strong><small id="rtspUrl">—</small></div><div class="card"><label>Command latency</label><strong id="latency">—</strong><small id="appVersion">—</small></div></div>
     <div class="card operator"><h2>Scanner Discovery</h2><p id="discoveryState">Searching local network…</p><label>SDS200 IPv4 address <input id="manualIp" type="text" inputmode="decimal" placeholder="e.g. 192.168.1.50" /></label><div class="action-row"><button id="scanNetwork">Scan Network</button><button id="useManualIp">Verify & Use IP</button></div><p class="notice">Only a device that positively identifies as SDS200/SDS200E is accepted. No simulated scanner or fake telemetry is used.</p></div>
+    <div class="card">
+      <div class="card-head"><div><span class="cap direct">DIRECT</span><h2>Scanner Location &amp; Range</h2><p>Enter a postcode (house number optional) and the latitude, longitude and range are set on the scanner — no coordinates to look up.</p></div></div>
+      <div class="addr-grid">
+        <label>House no. <input id="addrHouse" type="text" autocomplete="off" placeholder="12" /></label>
+        <label>Postcode <input id="addrPostcode" type="text" autocomplete="postal-code" placeholder="WF3 1AB" /></label>
+        <label>Range (miles) <input id="addrRange" type="number" min="0" max="999" step="1" placeholder="50" /></label>
+      </div>
+      <div class="action-row"><button id="addrLookup">Look up</button><button id="addrSet">Set on scanner</button></div>
+      <p id="addrResult" class="notice">Not looked up yet.</p>
+    </div>
     <div class="card assistant-card">
       <div class="card-head"><div><span class="cap direct">AI</span><h2>Assistant</h2><p id="aiProvider">Checking providers…</p></div><button id="aiKeys">API keys</button></div>
       <div id="aiLog" class="ai-log"><p class="notice">Ask in plain English: “hold this channel”, “squelch 3”, “tune 446.00625”, “what is it scanning?”, “turn off aircraft service types”, “set range to 25 miles”.</p></div>
