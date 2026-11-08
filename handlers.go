@@ -1706,3 +1706,62 @@ func normaliseMenuText(s string) string {
 	}
 	return strings.ToLower(strings.Join(strings.Fields(s), " "))
 }
+
+// -------------------------------------------------- searchable memory index
+
+func (a *App) apiMemoryIndex(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		writeJSON(w, 200, a.memIndex.Status())
+	case "POST":
+		if err := a.requireControl(r); err != nil {
+			errJSON(w, err)
+			return
+		}
+		var b struct {
+			IncludeFullDatabase bool `json:"include_full_database"`
+			Stop                bool `json:"stop"`
+		}
+		if err := readJSON(r, &b); err != nil {
+			errJSON(w, err)
+			return
+		}
+		if b.Stop {
+			a.memIndex.Stop()
+			writeJSON(w, 200, a.memIndex.Status())
+			return
+		}
+		if err := a.memIndex.Build(b.IncludeFullDatabase); err != nil {
+			errJSON(w, &httpError{409, err.Error()})
+			return
+		}
+		a.log.Info("MEMORY", "Index build started", map[string]any{"full_database": b.IncludeFullDatabase})
+		writeJSON(w, 202, a.memIndex.Status())
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		writeJSON(w, 405, map[string]any{"detail": "method not allowed"})
+	}
+}
+
+func (a *App) apiMemorySearch(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, "GET") {
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		errJSON(w, &httpError{422, "q is required"})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	st := a.memIndex.Status()
+	res := a.memIndex.Search(q, limit)
+	out := make([]map[string]any, 0, len(res))
+	for _, e := range res {
+		out = append(out, map[string]any{
+			"kind": e.Kind, "name": e.Name, "index": e.Index, "frequency": e.Frequency, "tgid": e.TGID,
+			"modulation": e.Modulation, "service_type": e.ServiceType, "path": e.Path(),
+			"department": e.Department, "system": e.System, "list": e.List,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"query": q, "results": out, "index": st})
+}

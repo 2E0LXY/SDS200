@@ -21,7 +21,7 @@ Rules:
 - Read the state first when a request depends on it (which channel, which system, what mode).
 - Volume is 0-29, squelch 0-19. Frequencies are given in MHz by the operator; tools take MHz unless stated.
 - Holds toggle a specific item: hold the channel to stay on it, release to resume scanning.
-- To go to a named channel, call browse_memory to find it, then go_to_channel with its index.
+- To go to a named channel, call find_channel with the name, then go_to_channel with the index it returns. browse_memory walks the tree level by level when you need the structure instead.\n- If find_channel says the memory is not indexed, call index_memory with start=true, tell the operator it is running, and try the search again afterwards.
 - The SDS200 has no Service, Range or Squelch-push key. Service Types is func_key with key "Z"; range is set with set_range or set_location_from_address.
 - Long presses cannot be sent over the network, so the three-second functions (global attenuator, weather mode, colour mode) are unavailable; say so if asked.
 - Waterfall and analyse modes take the radio out of normal scanning. Say what you are about to do, do it, then report what the scanner shows.
@@ -430,6 +430,50 @@ func (a *App) aiTools() []AITool {
 					return nil, err
 				}
 				return map[string]any{"latitude": lat, "longitude": lon, "range_miles": rng}, nil
+			},
+		},
+		{
+			Name:        "find_channel",
+			Description: "Search everything programmed in the scanner by name, e.g. 'Leeds United', 'Elland Road', 'airport', 'fire control'. Returns matching channels and talkgroups with the index that go_to_channel needs. Use this before tune_frequency when the operator names a place or service rather than a frequency.",
+			Parameters:  schema(map[string]any{"query": strProp("What to look for"), "limit": intProp("How many results, default 10", 1, 50)}, "query"),
+			Run: func(args map[string]any) (any, error) {
+				q := argString(args, "query")
+				if q == "" {
+					return nil, fmt.Errorf("query is required")
+				}
+				limit, ok := argInt(args, "limit")
+				if !ok {
+					limit = 10
+				}
+				st := a.memIndex.Status()
+				res := a.memIndex.Search(q, limit)
+				out := make([]map[string]any, 0, len(res))
+				for _, e := range res {
+					out = append(out, map[string]any{"kind": e.Kind, "index": e.Index, "name": e.Name, "frequency": e.Frequency, "tgid": e.TGID, "modulation": e.Modulation, "path": e.Path()})
+				}
+				if len(out) == 0 {
+					if st.Entries == 0 {
+						return nil, fmt.Errorf("the scanner's memory has not been indexed yet; call index_memory first, then search again")
+					}
+					return map[string]any{"results": out, "searched": st.Entries, "note": "nothing programmed matches that name"}, nil
+				}
+				return map[string]any{"results": out, "searched": st.Entries, "indexed_at": st.Built}, nil
+			},
+		},
+		{
+			Name:        "index_memory",
+			Description: "Read everything programmed in the scanner into a searchable index, so find_channel works. Takes a few minutes and runs in the background; call again with no arguments to see progress. The full UK database is skipped unless include_full_database is true, because it is very large.",
+			Parameters:  schema(map[string]any{"start": boolProp("true to start a build; omit to just report progress"), "include_full_database": boolProp("Also walk the full database (slow)")}),
+			Writes:      true,
+			Run: func(args map[string]any) (any, error) {
+				if start, ok := argBool(args, "start"); ok && start {
+					full, _ := argBool(args, "include_full_database")
+					if err := a.memIndex.Build(full); err != nil {
+						return nil, err
+					}
+					time.Sleep(600 * time.Millisecond)
+				}
+				return a.memIndex.Status(), nil
 			},
 		},
 		{

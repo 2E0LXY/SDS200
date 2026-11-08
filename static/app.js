@@ -353,3 +353,44 @@ if($('#menuExit'))$('#menuExit').onclick=()=>menuBack(true);
 if($('#menuEnterTop'))$('#menuEnterTop').onclick=async()=>{try{const d=await control('/api/control/key',{key:'M'});if(d.display)renderDisplay(d.display);await menuRefresh()}catch(e){log(`Menu: ${e.message}`,'WARN','CONTROL')}};
 setInterval(()=>{if(activePage===2)menuRefresh()},2500);
 setTimeout(menuRefresh,1500);
+
+// ---- Search what is programmed in the scanner (index built by walking GLT) ----
+async function memIndexStatus(){
+  if(!$('#memIndexState'))return;
+  try{
+    const d=await api('/api/memory/index');
+    const when=d.built&&!String(d.built).startsWith('0001')?new Date(d.built).toLocaleString():null;
+    text('#memIndexState',d.building?`Indexing… ${d.progress||''}`:(d.entries?`${d.entries} channels indexed${when?` on ${when}`:''}${d.partial?` (partial: ${d.stopped})`:''}`:'Not indexed yet — press “Build index”.'));
+    $('#memIndexBuild').disabled=!!d.building;$('#memIndexFull').disabled=!!d.building;
+    return d;
+  }catch(e){text('#memIndexState',e.message)}
+}
+async function memIndexBuild(full){
+  try{
+    await control('/api/memory/index',{include_full_database:!!full});
+    log(full?'Indexing the full database — this takes a while':'Indexing favourites','INFO','MEMORY');
+    memIndexStatus();
+  }catch(e){log(`Index: ${e.message}`,'WARN','MEMORY')}
+}
+if($('#memIndexBuild'))$('#memIndexBuild').onclick=()=>memIndexBuild(false);
+if($('#memIndexFull'))$('#memIndexFull').onclick=()=>memIndexBuild(true);
+if($('#memSearchForm'))$('#memSearchForm').onsubmit=async e=>{
+  e.preventDefault();
+  const q=$('#memSearchQ').value.trim();if(!q)return;
+  const box=$('#memSearchResults');box.innerHTML='<div class="empty">Searching…</div>';
+  try{
+    const d=await api(`/api/memory/search?${new URLSearchParams({q,limit:'25'})}`);
+    box.innerHTML='';
+    if(!d.results.length){box.innerHTML=`<div class="empty">Nothing programmed matches “${escapeHtml(q)}”${d.index.entries?'':' — build the index first'}.</div>`;return}
+    for(const r of d.results){
+      const el=document.createElement('div');
+      el.className='list-row memory-row';
+      const detail=[r.frequency?formatDisplayFrequency(r.frequency):null,r.tgid,r.modulation,r.service_type].filter(Boolean).join(' • ');
+      el.innerHTML=`<span class="led"></span><div><strong>${escapeHtml(r.name)}</strong><div class="meta">${escapeHtml(r.path)}</div><div class="meta">${escapeHtml(detail)}</div></div><span>${escapeHtml(r.index)}</span>`;
+      el.onclick=()=>memoryGoto(r.kind,{Index:r.index,Name:r.name});
+      box.appendChild(el);
+    }
+  }catch(e){box.innerHTML=`<div class="empty">${escapeHtml(e.message)}</div>`}
+};
+setInterval(()=>{if(activePage===3)memIndexStatus()},3000);
+setTimeout(memIndexStatus,1800);

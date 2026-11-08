@@ -164,6 +164,11 @@
 
   <section class="page" aria-label="Scanner Memory">
     <div class="section-title"><div><span>04</span><h1>Memory</h1></div><span class="page-state">FAVORITES</span></div>
+    <div class="card">
+      <div class="card-head"><div><span class="cap direct">DIRECT</span><h2>Search Programmed Memory</h2><p id="memIndexState">Not indexed yet.</p></div><div class="action-row"><button id="memIndexBuild">Build index</button><button id="memIndexFull">Include full database</button></div></div>
+      <form id="memSearchForm" class="ai-form"><input id="memSearchQ" type="search" autocomplete="off" placeholder="Name, place or service — e.g. Elland Road, airport, fire control" /><button type="submit">Search</button></form>
+      <div id="memSearchResults" class="list-rows"></div>
+    </div>
     <div class="card memory-card">
       <div class="card-head"><div><h2>Scanner Memory Browser</h2><p>Favorites → Systems → Departments/Sites → Channels/TGIDs/Site Frequencies. Click a channel or talkgroup to tune the scanner to it.</p></div><div class="action-row"><button id="memoryBack">Back</button><button id="memoryHome">Top</button></div></div>
       <div id="memoryBreadcrumb" class="memory-breadcrumb">Favorites</div>

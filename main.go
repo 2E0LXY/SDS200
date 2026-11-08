@@ -40,6 +40,9 @@ type Config struct {
 	StateCacheMS int      `json:"state_cache_ms"`
 	LogLevel     string   `json:"log_level"`
 	AI           AIConfig `json:"ai"`
+	// LicenceServer is the base URL of the checkout/key server (see
+	// cmd/licence-server). Empty hides the Buy button.
+	LicenceServer string `json:"licence_server,omitempty"`
 }
 
 func defaultConfig() Config {
@@ -117,6 +120,8 @@ type App struct {
 	discovering      bool
 	discoveryMessage string
 
+	licence   *LicenceManager
+	memIndex  *MemIndex
 	waterfall *WaterfallHub
 	audio     *AudioHub
 	recorder  *Recorder
@@ -171,6 +176,8 @@ func NewApp() (*App, error) {
 	a.audio = NewAudioHub(a)
 	a.waterfall = NewWaterfallHub(a)
 	a.recorder = NewRecorder(a, filepath.Join(dir, "recordings"))
+	a.memIndex = NewMemIndex(a, dir)
+	a.licence = NewLicenceManager(dir, lg)
 	a.log.Info("APP", "SDS200 WebApp starting", map[string]any{"version": appVersion, "data_dir": dir, "real_radio_only": true})
 	if cfg.Host != "" {
 		a.log.Info("APP", "Configured scanner target", map[string]any{"host": cfg.Host, "udp_port": cfg.UDPPort})
@@ -320,6 +327,9 @@ func copyMap(in map[string]any) map[string]any {
 }
 
 func (a *App) requireControl(r *http.Request) error {
+	if err := a.requireLicence(); err != nil {
+		return err
+	}
 	cfg := a.configSnapshot()
 	if cfg.ControlToken != "" && r.Header.Get("X-Control-Token") != cfg.ControlToken {
 		return &httpError{403, "invalid control token"}
@@ -410,6 +420,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/favorites", a.apiFavorites)
 	mux.HandleFunc("/api/memory", a.apiMemory)
 	mux.HandleFunc("/api/memory/goto", a.apiMemoryGoto)
+	mux.HandleFunc("/api/memory/index", a.apiMemoryIndex)
+	mux.HandleFunc("/api/memory/search", a.apiMemorySearch)
 	mux.HandleFunc("/api/geocode", a.apiGeocode)
 	mux.HandleFunc("/api/menu", a.apiMenu)
 	mux.HandleFunc("/api/menu/state", a.apiMenuState)
@@ -419,6 +431,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/clock", a.apiClock)
 	mux.HandleFunc("/api/ai", a.apiAI)
 	mux.HandleFunc("/api/ai/config", a.apiAIConfig)
+	mux.HandleFunc("/api/licence", a.apiLicence)
 	mux.HandleFunc("/api/waterfall/status", a.apiWaterfallStatus)
 	mux.HandleFunc("/api/waterfall/start", a.apiWaterfallStart)
 	mux.HandleFunc("/api/waterfall/stop", a.apiWaterfallStop)
