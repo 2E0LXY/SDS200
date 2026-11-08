@@ -72,7 +72,11 @@ type memIndexFile struct {
 
 const (
 	memIndexMaxEntries = 40000
+	// The favourites lists walk in well under a minute; the full UK database is
+	// tens of thousands of channels over UDP, so it gets an hour before the
+	// build gives up and keeps what it has.
 	memIndexBudget     = 12 * time.Minute
+	memIndexFullBudget = 60 * time.Minute
 )
 
 func NewMemIndex(a *App, dir string) *MemIndex {
@@ -126,7 +130,11 @@ func (m *MemIndex) Build(includeFullDatabase bool) error {
 		m.mu.Unlock()
 		return fmt.Errorf("the index is already being built")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), memIndexBudget)
+	budget := memIndexBudget
+	if includeFullDatabase {
+		budget = memIndexFullBudget
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	m.cancel = cancel
 	m.status = MemIndexStatus{Building: true, FullDatabase: includeFullDatabase, Progress: "Reading favourites lists…"}
 	m.mu.Unlock()
