@@ -24,7 +24,7 @@ import (
 )
 
 // appVersion is overridden at build time with -ldflags "-X main.appVersion=<tag>".
-var appVersion = "0.8.0-dev"
+var appVersion = "0.9.0-dev"
 
 //go:embed static/*
 var staticFS embed.FS

@@ -34,7 +34,7 @@ var (
 	nominatimEndpoint = "https://nominatim.openstreetmap.org"
 )
 
-const geocodeUserAgent = "SDS200-WebApp/" + "0.8 (+https://github.com/2E0LXY/SDS200)"
+const geocodeUserAgent = "SDS200-WebApp/" + "0.9 (+https://github.com/2E0LXY/SDS200)"
 
 // GeoResult is one resolved address.
 type GeoResult struct {

@@ -1,12 +1,12 @@
 name: firmware
 
+# No paths filter on push: GitHub ANDs path filters with the ref filter, so a
+# v* tag on a commit that did not touch firmware/ would be skipped and the
+# release would go out without a firmware image.
 on:
   push:
     branches: ['**']
     tags: ['v*']
-    paths:
-      - 'firmware/**'
-      - '.github/workflows/firmware.yml'
   pull_request:
     paths:
       - 'firmware/**'

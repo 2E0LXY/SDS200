@@ -9,12 +9,12 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// Version: APP_VERSION (e.g. "v0.8.1" from a tag) else 0.8.0-dev; code from the CI run number.
+// Version: APP_VERSION (e.g. "v0.8.1" from a tag) else 0.9.0-dev; code from the CI run number.
 // Untagged builds carry a build stamp so two dev APKs can be told apart in Settings.
 val buildStamp: String = DateTimeFormatter.ofPattern("yyyyMMdd.HHmm")
     .withZone(ZoneOffset.UTC).format(Instant.now())
 val appVersionName: String = (System.getenv("APP_VERSION") ?: "").trim().removePrefix("v")
-    .ifEmpty { "0.8.0-dev+$buildStamp" }
+    .ifEmpty { "0.9.0-dev+$buildStamp" }
 val appVersionCode: Int = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()?.coerceIn(1, 2_100_000_000) ?: 1
 
 // Release signing from environment (CI secrets). Falls back to the debug key so

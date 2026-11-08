@@ -10,13 +10,13 @@ name: android
 # Without them the release APK is signed with the runner's debug key: installable,
 # but each runner has a different debug key, so updates may need an uninstall first.
 
+# No paths filter on push: GitHub ANDs path filters with the ref filter, so a
+# v* tag on a commit that did not touch android/ would be skipped and the
+# release would go out without an APK.
 on:
   push:
     branches: ['**']
     tags: ['v*']
-    paths:
-      - 'android/**'
-      - '.github/workflows/android.yml'
   pull_request:
     paths:
       - 'android/**'
@@ -64,7 +64,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             V="${GITHUB_REF_NAME#v}"
           else
-            V="0.8.0-dev.${GITHUB_RUN_NUMBER}"
+            V="0.9.0-dev.${GITHUB_RUN_NUMBER}"
           fi
           echo "APP_VERSION=$V" >> "$GITHUB_ENV"
           echo "Building version $V (code $GITHUB_RUN_NUMBER)"

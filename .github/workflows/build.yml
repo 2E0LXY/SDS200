@@ -1,10 +1,11 @@
 name: build
 
+# paths-ignore was removed deliberately: it would have skipped a v* tag whose
+# commit only touched firmware/, and a release has to build everything.
 on:
   push:
     branches: [main]
     tags: ['v*']
-    paths-ignore: ['firmware/**']
   pull_request:
   workflow_dispatch:
 
@@ -47,7 +48,7 @@ jobs:
       - name: Version
         id: v
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.8.0-dev.${GITHUB_RUN_NUMBER}+$(git rev-parse --short HEAD)"; fi
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.9.0-dev.${GITHUB_RUN_NUMBER}+$(git rev-parse --short HEAD)"; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Windows amd64
         run: |
