@@ -234,9 +234,9 @@
       <p class="hint" id="audioError">Audio has not been started. No background RTSP port probe is performed.</p>
       <div class="grid three"><div class="card"><label>Scanner RTSP</label><strong id="rtspHost">—</strong></div><div class="card"><label>PC LAN address</label><strong id="rtspLocalIp">—</strong></div><div class="card"><label>TCP port</label><strong id="rtspPort">554</strong></div></div>
       <div class="audio-meter" id="audioMeter"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-      <audio id="audio" controls preload="none"></audio>
+      <div class="slider-block audio-volume"><label>Listening volume <output id="audioVolumeOut">100</output><small>%</small></label><input id="audioVolume" type="range" min="0" max="100" value="100" /></div>
       <div class="action-row"><button id="audioConnect">▶ Listen Live</button><button id="audioStop">■ Stop</button><button data-key="Y">Replay</button></div>
-      <p class="notice">Browser audio is a separate connection from scanner control and may have its own media buffer.</p>
+      <p class="notice">Audio is a separate connection from scanner control. It is decoded packet by packet into Web Audio rather than handed to a media player, so the delay stays around a tenth of a second; if the network stalls, the backlog is dropped instead of played late. This slider sets the level on this device only — it does not touch the scanner’s own volume.</p>
     </div>
     <div class="grid two">
       <div class="card"><h2>Scanner SD Recording</h2><p>Status: <strong id="recording">—</strong></p><div class="action-row"><button id="recordOn" class="red">● START ON SCANNER</button><button id="recordOff">■ STOP</button></div></div>
@@ -301,5 +301,6 @@
   </section>
 </main>
 <script src="/static/app.js"></script>
+<script src="/static/help.js"></script>
 </body>
 </html>

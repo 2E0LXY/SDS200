@@ -126,18 +126,111 @@ $$('[data-analysis]').forEach(b=>b.onclick=async()=>{const mode=b.dataset.analys
 $$('[data-pause]').forEach(b=>b.onclick=async()=>{const mode=b.dataset.pause;try{const d=await control('/api/analysis/pause',{mode});$(analysisOutput(mode)).textContent=JSON.stringify(d,null,2);log(`${mode} pause/resume sent`)}catch(e){log(e.message)}});
 $('#rfPlot').onclick=async()=>{try{const d=await control('/api/analysis/start',{mode:'RF_POWER_PLOT',frequency:Number($('#rfFreq').value),modulation:$('#rfMod').value,sampling_rate:Number($('#rfRate').value)});$('#powerAnalysis').textContent=JSON.stringify(d,null,2);log('RF power plot started')}catch(e){log(e.message)}};
 
-let audioCtx=null,audioSource=null,audioAnalyser=null,audioMeterFrame=null;
+// ---- Live audio ----------------------------------------------------------
+// The scanner's audio is 8 kHz mu-law over RTP; the server decodes it to PCM
+// and streams it as a never-ending WAV. An <audio> element plays that with
+// about ten seconds of media buffer and never catches up, so the stream is
+// read with fetch instead and each 20 ms packet is scheduled straight into
+// Web Audio. When playback drifts more than driftLimit behind real time the
+// backlog is dropped rather than played out, which keeps the delay near a
+// tenth of a second whatever the network does.
+
+const AUDIO_RATE = 8000;
+const audioLead = 0.09;      // how far ahead of now the first chunk is scheduled
+const audioDriftLimit = 0.35; // drop the backlog beyond this
+let audioCtx = null, audioGain = null, audioAnalyser = null, audioMeterFrame = null;
+let live = null; // {abort, playHead, tail, muted}
+
 function meterOff(){cancelAnimationFrame(audioMeterFrame);audioMeterFrame=null;$('#audioMeter').classList.remove('active');$('#dashAudioMeter').classList.remove('active');$$('#audioMeter i, #dashAudioMeter i').forEach(b=>b.style.height='20%')}
-function meterFromRealAudio(a){
-  try{
-    if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    if(!audioSource){audioSource=audioCtx.createMediaElementSource(a);audioAnalyser=audioCtx.createAnalyser();audioAnalyser.fftSize=256;audioSource.connect(audioAnalyser);audioAnalyser.connect(audioCtx.destination)}
-    audioCtx.resume();$('#audioMeter').classList.add('active');$('#dashAudioMeter').classList.add('active');
-    const data=new Uint8Array(audioAnalyser.fftSize);
-    const tick=()=>{audioAnalyser.getByteTimeDomainData(data);let sum=0;for(const v of data){const x=(v-128)/128;sum+=x*x}const rms=Math.sqrt(sum/data.length);const level=Math.max(0,Math.min(1,rms*6));const bars=$$('#audioMeter i');bars.forEach((b,i)=>{const threshold=(i+1)/bars.length;b.style.height=`${20+(level>=threshold?70:0)}%`});const dbars=$$('#dashAudioMeter i');dbars.forEach((b,i)=>{const threshold=(i+1)/dbars.length;b.style.height=`${18+(level>=threshold?72:0)}%`});audioMeterFrame=requestAnimationFrame(tick)};
-    cancelAnimationFrame(audioMeterFrame);tick();
-  }catch(e){meterOff();log(`Audio meter unavailable: ${e.message}`)}
+
+function audioGraph(){
+  if(!audioCtx)audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  if(!audioGain){
+    audioGain=audioCtx.createGain();
+    audioAnalyser=audioCtx.createAnalyser();
+    audioAnalyser.fftSize=256;
+    audioGain.connect(audioAnalyser);
+    audioAnalyser.connect(audioCtx.destination);
+  }
+  audioCtx.resume();
+  return audioCtx;
 }
+
+function meterStart(){
+  $('#audioMeter').classList.add('active');$('#dashAudioMeter').classList.add('active');
+  const data=new Uint8Array(audioAnalyser.fftSize);
+  const tick=()=>{
+    audioAnalyser.getByteTimeDomainData(data);
+    let sum=0;for(const v of data){const x=(v-128)/128;sum+=x*x}
+    const level=Math.max(0,Math.min(1,Math.sqrt(sum/data.length)*6));
+    $$('#audioMeter i').forEach((b,i,all)=>{b.style.height=`${20+(level>=(i+1)/all.length?70:0)}%`});
+    $$('#dashAudioMeter i').forEach((b,i,all)=>{b.style.height=`${18+(level>=(i+1)/all.length?72:0)}%`});
+    audioMeterFrame=requestAnimationFrame(tick);
+  };
+  cancelAnimationFrame(audioMeterFrame);tick();
+}
+
+// playChunk schedules one block of PCM16LE and reports the delay it is running at.
+function playChunk(bytes){
+  const ctx=audioCtx;
+  const samples=bytes.length>>1;
+  if(!samples)return;
+  const buf=ctx.createBuffer(1,samples,AUDIO_RATE);
+  const out=buf.getChannelData(0);
+  const dv=new DataView(bytes.buffer,bytes.byteOffset,samples*2);
+  for(let i=0;i<samples;i++)out[i]=dv.getInt16(i*2,true)/32768;
+  const now=ctx.currentTime;
+  if(live.playHead<now+0.01)live.playHead=now+audioLead;          // first chunk, or an underrun
+  else if(live.playHead-now>audioDriftLimit)live.playHead=now+audioLead; // behind: drop the backlog
+  const src=ctx.createBufferSource();
+  src.buffer=buf;
+  src.connect(audioGain);
+  src.start(live.playHead);
+  live.playHead+=buf.duration;
+}
+
+async function attachLiveAudio(){
+  stopLivePlayer();
+  const ctx=audioGraph();
+  const abort=new AbortController();
+  live={abort,playHead:0,muted:false};
+  audioGain.gain.value=listenLevel();
+  const res=await fetch(`/api/audio/live.wav?ts=${Date.now()}`,{signal:abort.signal,cache:'no-store'});
+  if(!res.ok||!res.body){
+    let detail=`HTTP ${res.status}`;
+    try{detail=(await res.json()).detail||detail}catch{}
+    live=null;meterOff();throw new Error(detail);
+  }
+  meterStart();
+  log('Browser attached to confirmed RTP audio (low-latency Web Audio path)','INFO','AUDIO');
+  (async()=>{
+    const reader=res.body.getReader();
+    let skip=44;      // the streaming WAV header
+    let odd=null;     // a byte left over from a chunk that split a sample
+    try{
+      for(;;){
+        const {done,value}=await reader.read();
+        if(done)break;
+        if(!live||live.abort!==abort)break;
+        let b=value;
+        if(skip){const n=Math.min(skip,b.length);skip-=n;b=b.subarray(n);if(!b.length)continue}
+        if(odd){const j=new Uint8Array(odd.length+b.length);j.set(odd);j.set(b,odd.length);b=j;odd=null}
+        if(b.length&1){odd=b.subarray(b.length-1).slice();b=b.subarray(0,b.length-1)}
+        if(b.length)playChunk(b.slice());
+      }
+    }catch(e){
+      if(e.name!=='AbortError')log(`Audio stream ended: ${e.message}`,'WARN','AUDIO');
+    }
+    if(live&&live.abort===abort){meterOff();log('Audio stream closed by the server','WARN','AUDIO')}
+  })();
+}
+
+function stopLivePlayer(){
+  if(live){try{live.abort.abort()}catch{}live=null}
+  if(audioGain)audioGain.gain.value=0;
+  meterOff();
+}
+
 let audioStarting=false;
 async function waitForRealRtp(initial){
   let d=initial;
@@ -149,12 +242,6 @@ async function waitForRealRtp(initial){
   }
   return d;
 }
-async function attachLiveAudio(){
-  const a=$('#audio');
-  a.src=`/api/audio/live.wav?ts=${Date.now()}`;
-  try{await a.play();meterFromRealAudio(a);log('Browser attached to confirmed RTP audio','INFO','AUDIO')}
-  catch(e){meterOff();log(`Browser audio playback: ${e.message}`,'ERROR','AUDIO');throw e}
-}
 async function startLiveAudio(){
   if(audioStarting)return;
   audioStarting=true;$('#audioConnect').disabled=true;$('#dashListen').disabled=true;
@@ -164,17 +251,28 @@ async function startLiveAudio(){
     d=await waitForRealRtp(d);
     if((d?.session?.packets||0)<=0){log('RTSP PLAY succeeded but no RTP packets have arrived; browser source not attached','WARN','RTP');await audioStatus();return}
     await attachLiveAudio();await audioStatus();
-  }catch(e){meterOff();log(`Audio start failed: ${e.message}`,'ERROR','AUDIO');await audioStatus()}
+  }catch(e){stopLivePlayer();log(`Audio start failed: ${e.message}`,'ERROR','AUDIO');await audioStatus()}
   finally{audioStarting=false;$('#audioConnect').disabled=false;$('#dashListen').disabled=false}
 }
 async function stopLiveAudio(){
-  const a=$('#audio');a.pause();a.removeAttribute('src');a.load();meterOff();
+  stopLivePlayer();
   try{await control('/api/audio/stop',{});log('Remote audio stopped; RTSP TEARDOWN requested','INFO','AUDIO')}catch(e){log(`Audio stop: ${e.message}`,'ERROR','AUDIO')}
   await audioStatus();
 }
 $('#audioConnect').onclick=startLiveAudio;$('#dashListen').onclick=startLiveAudio;$('#audioStop').onclick=stopLiveAudio;$('#dashAudioStop').onclick=stopLiveAudio;
-$('#dashMute').onclick=()=>{const a=$('#audio');a.muted=!a.muted;$('#dashMute').textContent=a.muted?'UNMUTE':'MUTE';log(a.muted?'Browser audio muted':'Browser audio unmuted','INFO','AUDIO')};
-$('#audio').addEventListener('error',()=>{const a=$('#audio');if(!a.getAttribute('src'))return;const code=a.error?.code||0;log(`Browser audio element error ${code}`,'ERROR','AUDIO');meterOff();audioStatus()});
+if($('#audioVolume'))$('#audioVolume').oninput=e=>{
+  const pct=Number(e.target.value);
+  text('#audioVolumeOut',String(pct));
+  if(audioGain&&!(live&&live.muted))audioGain.gain.value=pct/100;
+};
+function listenLevel(){const el=$('#audioVolume');return el?Number(el.value)/100:1}
+$('#dashMute').onclick=()=>{
+  if(!live||!audioGain)return;
+  live.muted=!live.muted;
+  audioGain.gain.value=live.muted?0:listenLevel();
+  $('#dashMute').textContent=live.muted?'UNMUTE':'MUTE';
+  log(live.muted?'Browser audio muted':'Browser audio unmuted','INFO','AUDIO');
+};
 
 $('#recordOn').onclick=()=>control('/api/control/record',{enabled:true}).then(()=>{log('Scanner SD recording started');refresh()}).catch(e=>log(e.message));
 $('#recordOff').onclick=()=>control('/api/control/record',{enabled:false}).then(()=>{log('Scanner SD recording stopped');refresh()}).catch(e=>log(e.message));

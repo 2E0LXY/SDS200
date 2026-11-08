@@ -52,3 +52,18 @@
 .licence-card .cap.direct{background:#1d3b2a;border-color:#2f6b47;color:#9ae6b4}
 .licence-card label{display:block;margin-top:12px}
 .licence-card input{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em}
+
+/* ---- On-screen help ---------------------------------------------------- */
+.section-desc{margin:-4px 0 14px;max-width:78ch;color:var(--muted,#9aa6b4);font-size:.92rem;line-height:1.55}
+details.help{margin-top:12px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px}
+details.help>summary{cursor:pointer;font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#9aa6b4);list-style:none}
+details.help>summary::-webkit-details-marker{display:none}
+details.help>summary::before{content:"?";display:inline-grid;place-items:center;width:16px;height:16px;margin-right:7px;border:1px solid currentColor;border-radius:50%;font-size:.7rem;vertical-align:-2px}
+details.help[open]>summary{color:var(--accent,#7cc4ff)}
+details.help dl{margin:10px 0 2px;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.9rem;line-height:1.5}
+details.help dt{color:var(--accent,#7cc4ff);font-weight:600;letter-spacing:.02em}
+details.help dd{margin:0;color:var(--text,#dde3ea)}
+.help-toggle{margin-left:auto;padding:6px 14px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:transparent;color:inherit;font:inherit;font-size:.82rem;cursor:pointer}
+.help-toggle.on{border-color:var(--accent,#7cc4ff);color:var(--accent,#7cc4ff)}
+@media (max-width:640px){details.help dl{grid-template-columns:1fr}details.help dt{margin-top:6px}}
+.audio-volume{margin:10px 0 2px;max-width:420px}
