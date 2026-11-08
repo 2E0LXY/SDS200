@@ -215,3 +215,28 @@ func TestUDPCommandWaitsForSeparatedGSIXML(t *testing.T) {
 type testError struct{ s string }
 
 func (e *testError) Error() string { return e.s }
+
+func TestMemIndexSearchRanksNamesAndFallsBack(t *testing.T) {
+	m := &MemIndex{entries: []MemEntry{
+		{Kind: "CFREQ", Name: "Leeds City Council", Index: "1", Department: "Beecroft Hill", System: "53p7", List: "WTR"},
+		{Kind: "CFREQ", Name: "Airport Fire", Index: "2", Department: "Nationwide", System: "Air Control", List: "Airports"},
+		{Kind: "TGID", Name: "Leeds Utd Stewards", Index: "3", Department: "Stadium", System: "Events", List: "WTR"},
+	}}
+	// Every word must match, and a name hit outranks a department hit.
+	got := m.Search("leeds", 10)
+	if len(got) != 2 || got[0].Name != "Leeds City Council" {
+		t.Fatalf("search(leeds) = %+v", got)
+	}
+	if hits := m.Search("leeds airport", 10); len(hits) != 0 {
+		t.Fatalf("an unmatchable word pair returned %+v", hits)
+	}
+	// The loose fallback finds the entry matching the most words.
+	loose := m.SearchAny("elland road leeds", 10)
+	if len(loose) == 0 || !strings.Contains(loose[0].Name, "Leeds") {
+		t.Fatalf("SearchAny = %+v", loose)
+	}
+	// A query matching nothing at all stays empty in both modes.
+	if hits := m.SearchAny("helsinki", 10); len(hits) != 0 {
+		t.Fatalf("SearchAny matched nothing-words: %+v", hits)
+	}
+}

@@ -1755,6 +1755,12 @@ func (a *App) apiMemorySearch(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	st := a.memIndex.Status()
 	res := a.memIndex.Search(q, limit)
+	partial := false
+	if len(res) == 0 {
+		if res = a.memIndex.SearchAny(q, limit); len(res) > 0 {
+			partial = true
+		}
+	}
 	out := make([]map[string]any, 0, len(res))
 	for _, e := range res {
 		out = append(out, map[string]any{
@@ -1763,5 +1769,5 @@ func (a *App) apiMemorySearch(w http.ResponseWriter, r *http.Request) {
 			"department": e.Department, "system": e.System, "list": e.List,
 		})
 	}
-	writeJSON(w, 200, map[string]any{"query": q, "results": out, "index": st})
+	writeJSON(w, 200, map[string]any{"query": q, "results": out, "index": st, "partial": partial})
 }

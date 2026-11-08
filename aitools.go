@@ -447,6 +447,15 @@ func (a *App) aiTools() []AITool {
 				}
 				st := a.memIndex.Status()
 				res := a.memIndex.Search(q, limit)
+				loose := false
+				if len(res) == 0 {
+					// Nothing matches every word; fall back to the best partial
+					// matches, because the programming rarely spells a place the
+					// way the operator says it.
+					if res = a.memIndex.SearchAny(q, limit); len(res) > 0 {
+						loose = true
+					}
+				}
 				out := make([]map[string]any, 0, len(res))
 				for _, e := range res {
 					out = append(out, map[string]any{"kind": e.Kind, "index": e.Index, "name": e.Name, "frequency": e.Frequency, "tgid": e.TGID, "modulation": e.Modulation, "path": e.Path()})
@@ -455,9 +464,17 @@ func (a *App) aiTools() []AITool {
 					if st.Entries == 0 {
 						return nil, fmt.Errorf("the scanner's memory has not been indexed yet; call index_memory first, then search again")
 					}
-					return map[string]any{"results": out, "searched": st.Entries, "note": "nothing programmed matches that name"}, nil
+					note := "nothing programmed matches that name"
+					if !st.FullDatabase {
+						note += "; only the favourites lists are indexed, so try index_memory with include_full_database true, or ask the operator for the frequency"
+					}
+					return map[string]any{"results": out, "searched": st.Entries, "note": note}, nil
 				}
-				return map[string]any{"results": out, "searched": st.Entries, "indexed_at": st.Built}, nil
+				res2 := map[string]any{"results": out, "searched": st.Entries, "indexed_at": st.Built}
+				if loose {
+					res2["note"] = "no entry matches every word, so these are the closest partial matches; check the names before jumping"
+				}
+				return res2, nil
 			},
 		},
 		{

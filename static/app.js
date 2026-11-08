@@ -381,7 +381,8 @@ if($('#memSearchForm'))$('#memSearchForm').onsubmit=async e=>{
   try{
     const d=await api(`/api/memory/search?${new URLSearchParams({q,limit:'25'})}`);
     box.innerHTML='';
-    if(!d.results.length){box.innerHTML=`<div class="empty">Nothing programmed matches “${escapeHtml(q)}”${d.index.entries?'':' — build the index first'}.</div>`;return}
+    if(!d.results.length){box.innerHTML=`<div class="empty">Nothing programmed matches “${escapeHtml(q)}”${d.index.entries?(d.index.included_full_database?'':' — only the favourites lists are indexed; try “Include full database”'):' — build the index first'}.</div>`;return}
+    if(d.partial)box.innerHTML='<div class="empty">No entry matches every word; closest matches below.</div>';
     for(const r of d.results){
       const el=document.createElement('div');
       el.className='list-row memory-row';

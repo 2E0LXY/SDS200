@@ -272,6 +272,18 @@ func (m *MemIndex) build(ctx context.Context, includeFullDatabase bool) {
 // somewhere in the entry, and a hit on the channel name outranks a hit on the
 // system or department.
 func (m *MemIndex) Search(q string, limit int) []MemEntry {
+	return m.search(q, limit, true)
+}
+
+// SearchAny is the fallback for a query where nothing matches every word, as
+// happens when the operator names a place the programming spells differently
+// ("Elland Road" against a channel called "Leeds Utd Stewards"). Entries that
+// match more of the words rank higher.
+func (m *MemIndex) SearchAny(q string, limit int) []MemEntry {
+	return m.search(q, limit, false)
+}
+
+func (m *MemIndex) search(q string, limit int, all bool) []MemEntry {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(q)))
 	if len(words) == 0 {
 		return nil
@@ -291,21 +303,21 @@ func (m *MemIndex) Search(q string, limit int) []MemEntry {
 		name := strings.ToLower(e.Name)
 		rest := strings.ToLower(strings.Join([]string{e.Department, e.System, e.List, e.ServiceType, e.Frequency, e.TGID}, " "))
 		score := 0
-		ok := true
+		matched := 0
 		for _, w := range words {
 			switch {
 			case strings.Contains(name, w):
 				score += 10
+				matched++
 				if strings.HasPrefix(name, w) {
 					score += 5
 				}
 			case strings.Contains(rest, w):
 				score += 3
-			default:
-				ok = false
+				matched++
 			}
 		}
-		if !ok {
+		if matched == 0 || (all && matched < len(words)) {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(e.Name), strings.TrimSpace(q)) {
