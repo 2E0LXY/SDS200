@@ -291,6 +291,13 @@ func (m *MemIndex) search(q string, limit int, all bool) []MemEntry {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
+	// Loose mode still needs most of the words, and only matches them at word
+	// boundaries: without that, "road" matches "Broadway" and "ROADPHONE" and
+	// the operator is handed nonsense.
+	need := len(words)
+	if !all {
+		need = 1
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -306,23 +313,26 @@ func (m *MemIndex) search(q string, limit int, all bool) []MemEntry {
 		matched := 0
 		for _, w := range words {
 			switch {
-			case strings.Contains(name, w):
+			case wordHit(name, w, all):
 				score += 10
 				matched++
 				if strings.HasPrefix(name, w) {
 					score += 5
 				}
-			case strings.Contains(rest, w):
+			case wordHit(rest, w, all):
 				score += 3
 				matched++
 			}
 		}
-		if matched == 0 || (all && matched < len(words)) {
+		if matched < need {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(e.Name), strings.TrimSpace(q)) {
 			score += 50
 		}
+		// Matching more of the words beats matching one of them well, which is
+		// what decides the order of a loose search.
+		score += matched * 100
 		hits = append(hits, scored{e, score})
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
@@ -339,4 +349,27 @@ func (m *MemIndex) search(q string, limit int, all bool) []MemEntry {
 		out = append(out, h.e)
 	}
 	return out
+}
+
+// wordHit reports whether word appears in text. Exact search matches anywhere,
+// which is what an operator typing part of a name expects; loose search only
+// matches the start of a word, so a short fragment cannot drag in unrelated
+// entries.
+func wordHit(text, word string, anywhere bool) bool {
+	if anywhere {
+		return strings.Contains(text, word)
+	}
+	for i := 0; i+len(word) <= len(text); i++ {
+		if i > 0 && isWordByte(text[i-1]) {
+			continue
+		}
+		if text[i:i+len(word)] == word {
+			return true
+		}
+	}
+	return false
+}
+
+func isWordByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }

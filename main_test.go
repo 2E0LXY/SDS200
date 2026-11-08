@@ -240,3 +240,20 @@ func TestMemIndexSearchRanksNamesAndFallsBack(t *testing.T) {
 		t.Fatalf("SearchAny matched nothing-words: %+v", hits)
 	}
 }
+
+func TestLooseSearchDoesNotMatchInsideWords(t *testing.T) {
+	m := &MemIndex{entries: []MemEntry{
+		{Kind: "CFREQ", Name: "RN Broadway Ops", Index: "1"},
+		{Kind: "TGID", Name: "RRUK", Index: "2", System: "DMR-O ROADPHONE LIMITED"},
+		{Kind: "CFREQ", Name: "Leeds Road Depot", Index: "3"},
+	}}
+	got := m.SearchAny("elland road", 10)
+	if len(got) == 0 || got[0].Index != "3" {
+		t.Fatalf("loose search ranked the wrong entry first: %+v", got)
+	}
+	for _, e := range got {
+		if e.Name == "RN Broadway Ops" {
+			t.Fatal("\"road\" matched inside \"Broadway\"")
+		}
+	}
+}
