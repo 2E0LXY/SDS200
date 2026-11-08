@@ -26,6 +26,12 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test -race ./...
+      - name: Licence server (its own module)
+        working-directory: cmd/licence-server
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test ./...
       - name: Check browser JavaScript (esbuild, Go binary - no Node)
         run: go run github.com/evanw/esbuild/cmd/esbuild@v0.25.10 static/app.js --log-level=warning > /dev/null
 
@@ -52,14 +58,21 @@ jobs:
       - name: Linux .deb (amd64, arm64, armhf)
         run: |
           for a in amd64 arm64 armhf; do bash scripts/build-deb.sh "${{ steps.v.outputs.version }}" "$a" dist; done
+      - name: Licence server (linux amd64 and arm64)
+        working-directory: cmd/licence-server
+        run: |
+          for a in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$a" go build -trimpath -ldflags="-s -w" -o "../../dist/licence-server-${{ steps.v.outputs.version }}-linux-$a" .
+          done
       - name: Checksums
-        run: cd dist && sha256sum *.zip *.deb > SHA256SUMS.txt && cat SHA256SUMS.txt
+        run: cd dist && sha256sum *.zip *.deb licence-server-* > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: SDS200-WebApp-${{ steps.v.outputs.version }}
           path: |
             dist/*.zip
             dist/*.deb
+            dist/licence-server-*
             dist/SHA256SUMS.txt
           if-no-files-found: error
 
