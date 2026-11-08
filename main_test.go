@@ -3,6 +3,7 @@ package main
 import (
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -253,5 +254,54 @@ func TestLooseSearchDoesNotMatchInsideWords(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("\"road\" matched inside another word: %+v", got)
+	}
+}
+
+// TestAudioFanOutSurvivesSubscriberChurn is the regression test for a crash
+// reported by Gene N7WDZ: a browser disconnecting while an RTP packet was
+// being fanned out could make the hub send on a closed channel, which panicked
+// and killed the process before RTSP TEARDOWN went out - leaving the scanner's
+// audio server hung until it was power cycled. Run with -race.
+func TestAudioFanOutSurvivesSubscriberChurn(t *testing.T) {
+	h := &AudioHub{subs: map[chan []byte]struct{}{}, running: true, packets: 1}
+	pcm := make([]byte, 320)
+	var wg, pub sync.WaitGroup
+	stop := make(chan struct{})
+
+	pub.Add(1)
+	go func() { // the RTP loop
+		defer pub.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				h.publish(pcm, 160)
+			}
+		}
+	}()
+	for i := 0; i < 8; i++ { // browsers connecting and disconnecting
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := 0; n < 300; n++ {
+				ch, release, err := h.Subscribe()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				select { // drain a little, like a real subscriber
+				case <-ch:
+				default:
+				}
+				release()
+			}
+		}()
+	}
+	wg.Wait()
+	close(stop)
+	pub.Wait()
+	if h.packets < 2 {
+		t.Fatal("the fan-out loop never ran")
 	}
 }

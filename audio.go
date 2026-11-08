@@ -555,26 +555,10 @@ func (h *AudioHub) run() {
 				h.app.log.Warn("RTP", "Unexpected payload type", map[string]any{"payload_type": pt, "sequence": seq})
 				continue
 			}
-			pcm := pcm16LEFromMuLaw(payload)
-			h.mu.Lock()
-			h.packets++
-			h.bytes += uint64(len(payload))
-			h.lastPacket = time.Now()
-			subs := make([]chan []byte, 0, len(h.subs))
-			for ch := range h.subs {
-				subs = append(subs, ch)
-			}
-			h.mu.Unlock()
+			h.publish(pcm16LEFromMuLaw(payload), len(payload))
 			h.firstOnce.Do(func() { close(h.firstPacket) })
 			if h.app.log.Level() == "TRACE" {
 				h.app.log.Trace("RTP", "packet", map[string]any{"sequence": seq, "timestamp": ts, "ssrc": ssrc, "payload_bytes": len(payload)})
-			}
-			for _, ch := range subs {
-				cp := append([]byte(nil), pcm...)
-				select {
-				case ch <- cp:
-				default:
-				}
 			}
 		} else if err != nil {
 			if ne, ok := err.(net.Error); !ok || !ne.Timeout() {
@@ -687,6 +671,31 @@ func (h *AudioHub) stopSession(reason string) {
 	h.mu.Unlock()
 	h.app.log.Info("AUDIO", "Audio session stopped", map[string]any{"reason": reason})
 }
+
+// publish counts one RTP packet and hands its PCM to every subscriber.
+//
+// The fan-out happens with h.mu held. Subscribe's release function deletes a
+// channel and closes it under the same lock, so sending after unlocking raced
+// a browser disconnecting: the loop could send on a channel that had just
+// been closed, panic, and take the process down before RTSP TEARDOWN was
+// sent - which leaves the scanner's audio server hung until it is power
+// cycled. The sends are non-blocking, so holding the lock cannot stall the
+// RTP loop. Reported with this fix by Gene N7WDZ.
+func (h *AudioHub) publish(pcm []byte, payloadBytes int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.packets++
+	h.bytes += uint64(payloadBytes)
+	h.lastPacket = time.Now()
+	for ch := range h.subs {
+		cp := append([]byte(nil), pcm...)
+		select {
+		case ch <- cp:
+		default:
+		}
+	}
+}
+
 func (h *AudioHub) Subscribe() (chan []byte, func(), error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
