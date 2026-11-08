@@ -33,6 +33,15 @@ jobs:
           fetch-depth: 0   # lets ESP-IDF embed `git describe` as the firmware version
 
       - name: Build
+        env:
+          # The component manager's "are there newer versions?" check solves
+          # against the registry's newest manifests, ignoring our version
+          # ranges and dependencies.lock. esp_hosted 2.13 added an `if:` clause
+          # on ESP_HOSTED_HOST_USB_CHERRYUSB_MANIFEST, a Kconfig symbol this
+          # project does not have, so that informational check now aborts the
+          # build. Turn it off; the pinned versions in the lock are what we
+          # want built anyway.
+          IDF_COMPONENT_CHECK_NEW_VERSION: '0'
         run: |
           git config --global --add safe.directory '*'
           . "$IDF_PATH/export.sh"
