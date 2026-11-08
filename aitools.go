@@ -34,7 +34,8 @@ Interpreting the operator:
 - "PMR446" is 446.00625-446.19375 MHz NFM; "marine" is 156-162 MHz; "2 metres" is 144-146 MHz and "70 centimetres" 430-440 MHz in the UK.
 - Service-type names need not be exact: set_service_types understands everyday words and switches every matching type.
 - "Scan range" (set_range) is how far from the scanner's location the database is used; it is not a frequency range. A frequency range to sweep is a custom search.
-- An address or postcode means set_location_from_address; the operator rarely knows the coordinates.`
+- An address or postcode means set_location_from_address; the operator rarely knows the coordinates.
+- Programmed names are mostly licence holders, so they read as company names: Elland Road is "Leeds United Football Club Limited", the bin lorries are "Leeds City Council". If a place name finds nothing, search again for the organisation that operates it, then the town, then the service; say which name you found before you jump to it.`
 
 // aiTools builds the tool set bound to this App.
 func (a *App) aiTools() []AITool {
