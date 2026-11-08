@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -112,12 +113,13 @@ func (m *LicenceManager) Status() map[string]any {
 	m.mu.RUnlock()
 	ok, reason := m.Allowed()
 	out := map[string]any{
-		"licensed":     lic != nil,
-		"allowed":      ok,
-		"first_run":    first.Format(time.RFC3339),
-		"trial_days":   trialDays,
-		"trial_ends":   m.TrialEnds().Format(time.RFC3339),
-		"days_left":    int(time.Until(m.TrialEnds()).Hours() / 24),
+		"licensed":   lic != nil,
+		"allowed":    ok,
+		"first_run":  first.Format(time.RFC3339),
+		"trial_days": trialDays,
+		"trial_ends": m.TrialEnds().Format(time.RFC3339),
+		// Round up: on the first day the operator should be told 14 days, not 13.
+		"days_left":    int(math.Ceil(time.Until(m.TrialEnds()).Hours() / 24)),
 		"price":        "£15",
 		"keys_enabled": licencePublicKey != "",
 	}
