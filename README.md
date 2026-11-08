@@ -54,6 +54,19 @@ answer. Requests need operator control, like any other write.
 Programming favourites (new systems, departments and channels) is not exposed:
 it needs the microSD card, not the LAN protocol. See `docs/FILE_FORMAT.md`.
 
+## Licence
+
+Control (anything that writes, plus audio and the assistant) is free for 14
+days from first run; reading status stays available for ever so the operator
+can still see the radio and activate. After that it needs a key: an
+Ed25519-signed token checked offline against a public key embedded in the
+binary. Keys are sold for £15 by `cmd/licence-server`, which takes the payment
+through PayPal Orders v2 and keeps purchases in SQLite.
+
+The check runs on the customer's own machine and this repository is public, so
+anyone willing to rebuild the binary can remove it. It stops casual sharing; it
+is not copy protection. See [docs/LICENSING.md](docs/LICENSING.md).
+
 ## Design rules
 - Real scanner only: no simulation, demo telemetry, synthetic waterfall or fallback audio.
 - Key presses are confirmed by a fresh STS read (retried while the scanner redraws).

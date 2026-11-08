@@ -3,6 +3,8 @@ package main
 import (
 	"crypto/ed25519"
 	"encoding/hex"
+
+	"sds200webapp/licencekey"
 	"strings"
 	"testing"
 	"time"
@@ -24,11 +26,11 @@ func withTestKeys(t *testing.T) ed25519.PrivateKey {
 func TestSignAndVerifyKey(t *testing.T) {
 	priv := withTestKeys(t)
 	want := Licence{Licensee: "A. Operator", Email: "a@example.com", Issued: time.Now().Truncate(time.Second), Order: "5O190127TN364715T"}
-	key, err := SignKey(priv, want)
+	key, err := licencekey.Sign(priv, want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(key, keyPrefix+"-") {
+	if !strings.HasPrefix(key, licencekey.Prefix+"-") {
 		t.Fatalf("key has the wrong prefix: %q", key)
 	}
 	got, err := VerifyKey(strings.ToLower(key))
@@ -38,7 +40,7 @@ func TestSignAndVerifyKey(t *testing.T) {
 	if got.Licensee != want.Licensee || got.Email != want.Email || got.Order != want.Order {
 		t.Fatalf("round trip lost fields: %+v", got)
 	}
-	if got.Product != productTag {
+	if got.Product != licencekey.ProductTag {
 		t.Fatalf("product tag = %q", got.Product)
 	}
 	if !got.Expires.IsZero() {
@@ -48,7 +50,7 @@ func TestSignAndVerifyKey(t *testing.T) {
 
 func TestVerifyKeyRejectsTampering(t *testing.T) {
 	priv := withTestKeys(t)
-	key, err := SignKey(priv, Licence{Licensee: "A. Operator", Issued: time.Now()})
+	key, err := licencekey.Sign(priv, Licence{Licensee: "A. Operator", Issued: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +72,7 @@ func TestVerifyKeyNeedsAPublicKey(t *testing.T) {
 	old := licencePublicKey
 	licencePublicKey = ""
 	t.Cleanup(func() { licencePublicKey = old })
-	if _, err := VerifyKey(keyPrefix + "-AAAA-AAAA"); err == nil {
+	if _, err := VerifyKey(licencekey.Prefix + "-AAAA-AAAA"); err == nil {
 		t.Fatal("keys must not verify in a build with no public key")
 	}
 }
@@ -101,7 +103,7 @@ func TestActivatedLicenceOutlivesTheTrial(t *testing.T) {
 	dir := t.TempDir()
 	m := NewLicenceManager(dir, nil)
 	m.state.FirstRun = time.Now().AddDate(0, 0, -99)
-	key, err := SignKey(priv, Licence{Licensee: "A. Operator", Issued: time.Now()})
+	key, err := licencekey.Sign(priv, Licence{Licensee: "A. Operator", Issued: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +126,7 @@ func TestExpiredLicenceIsRefused(t *testing.T) {
 	priv := withTestKeys(t)
 	m := NewLicenceManager(t.TempDir(), nil)
 	m.state.FirstRun = time.Now().AddDate(0, 0, -99)
-	key, err := SignKey(priv, Licence{Licensee: "A. Operator", Issued: time.Now().AddDate(-1, 0, 0), Expires: time.Now().AddDate(0, 0, -1)})
+	key, err := licencekey.Sign(priv, Licence{Licensee: "A. Operator", Issued: time.Now().AddDate(-1, 0, 0), Expires: time.Now().AddDate(0, 0, -1)})
 	if err != nil {
 		t.Fatal(err)
 	}

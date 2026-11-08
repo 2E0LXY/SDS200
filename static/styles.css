@@ -48,3 +48,7 @@
 .lcd-line.clickable:hover{background:#17465f;outline:1px solid #2f87b7}
 .menu-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0 2px;padding:.4rem .6rem;background:#0a2234;border:1px solid #1d4f70;border-radius:10px}
 .menu-title{font:600 12px ui-monospace,monospace;color:#74cfff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.licence-card .cap.direct{background:#1d3b2a;border-color:#2f6b47;color:#9ae6b4}
+.licence-card label{display:block;margin-top:12px}
+.licence-card input{width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em}

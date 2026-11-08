@@ -277,6 +277,12 @@
       <form id="aiForm" class="ai-form"><input id="aiPrompt" type="text" autocomplete="off" placeholder="Tell the scanner what to do…" /><button type="submit" id="aiSend">Send</button></form>
     </div>
     <div class="card"><div class="card-head"><div><span class="cap direct">DIRECT</span><h2>Scanner Clock</h2><p id="clockState">Not read yet.</p></div><div class="action-row"><button id="readClock">Read</button><button id="syncClock">Sync to this computer</button></div></div></div>
+    <div class="card licence-card">
+      <div class="card-head"><div><span class="cap direct">LICENCE</span><h2>Licence</h2><p id="licState">Checking…</p></div><div class="action-row"><button id="licBuy" hidden>Buy a key (£15)</button><button id="licRefresh">Refresh</button></div></div>
+      <label>Licence key <input id="licKey" type="text" autocomplete="off" spellcheck="false" placeholder="SDS200-1-…" /></label>
+      <div class="action-row"><button id="licActivate">Activate</button></div>
+      <p id="licDetail" class="notice">Scanner control is free for 14 days. Reading status always works, licensed or not.</p>
+    </div>
     <div class="card operator"><h2>Operator Control</h2><p id="leaseState">View only</p><label>Control token <input id="token" type="password" autocomplete="off" placeholder="Only if server requires one" /></label><div class="action-row"><button id="acquireLease">Take control</button><button id="releaseLease">Release</button></div></div>
     <div class="card"><h2>Function Directory</h2><p class="notice">Every owner-manual function is assigned to a logical area. Dedicated LAN controls are used where validated; remaining scanner functions stay reachable through the real front-panel/menu interface; Sentinel/USB-only operations are not misrepresented as network controls.</p><div class="directory-grid"><span>Live operation</span><b>Scanner</b><span>Menu/keypad</span><b>Control</b><span>Favorites/programming</span><b>Memory</b><span>Lists/QKs/services/location</span><b>Scan Setup</b><span>Search/Close Call/WX/Tone-Out</span><b>Search</b><span>Waterfall/Analyze/Discovery</span><b>Analyze</b><span>Replay/recording/live audio</span><b>Audio</b><span>Display/general configuration</span><b>Settings</b><span>Network/firmware/diagnostics</span><b>System</b></div></div>
     <div class="grid two">

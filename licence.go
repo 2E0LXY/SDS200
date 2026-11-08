@@ -16,13 +16,9 @@ package main
 // sharing and makes buying the easy path; it is not copy protection.
 
 import (
-	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base32"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -30,29 +26,22 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"sds200webapp/licencekey"
 )
 
-const (
-	trialDays  = 14
-	keyPrefix  = "SDS200-1"
-	productTag = "sds200-webapp"
-)
+const trialDays = 14
 
 // licencePublicKey verifies keys issued by the licence server. Replace this
 // with the public half printed by "licence-server -keygen" before shipping.
 var licencePublicKey = "" // hex-encoded Ed25519 public key; empty disables key checks
 
-var keyEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
+// Licence is the payload inside a key; the format lives in licencekey so the
+// licence server can sign what this verifies.
+type Licence = licencekey.Licence
 
-// Licence is the payload inside a key.
-type Licence struct {
-	Product  string    `json:"p"`
-	Licensee string    `json:"n"`
-	Email    string    `json:"e,omitempty"`
-	Issued   time.Time `json:"i"`
-	Expires  time.Time `json:"x,omitempty"` // zero means perpetual
-	Order    string    `json:"o,omitempty"` // PayPal order id, for support
-}
+// VerifyKey checks a key's signature against the embedded public key.
+func VerifyKey(key string) (*Licence, error) { return licencekey.Verify(licencePublicKey, key) }
 
 // licenceState is stored beside the config so a reinstall of the binary does
 // not reset the trial. It is deliberately not hidden or obfuscated.
@@ -170,132 +159,6 @@ func (m *LicenceManager) InstallationID() string {
 	defer m.mu.RUnlock()
 	h := sha256.Sum256([]byte(m.path + m.state.FirstRun.Format(time.RFC3339Nano)))
 	return hex.EncodeToString(h[:6])
-}
-
-// ----------------------------------------------------------------- the key
-//
-// Wire format: SDS200-1-<base32(payload)>-<base32(signature)>, upper case and
-// grouped in fives so it can be read out over the air or copied by hand.
-
-func formatKey(payload, sig []byte) string {
-	body := keyEncoding.EncodeToString(payload) + "-" + keyEncoding.EncodeToString(sig)
-	return keyPrefix + "-" + body
-}
-
-// SignKey builds a key for a licence. Used by the licence server.
-func SignKey(priv ed25519.PrivateKey, lic Licence) (string, error) {
-	lic.Product = productTag
-	payload, err := encodeLicence(lic)
-	if err != nil {
-		return "", err
-	}
-	return formatKey(payload, ed25519.Sign(priv, payload)), nil
-}
-
-// VerifyKey checks a key's signature and returns what it grants.
-func VerifyKey(key string) (*Licence, error) {
-	key = strings.ToUpper(strings.TrimSpace(key))
-	key = strings.ReplaceAll(key, " ", "")
-	if !strings.HasPrefix(key, strings.ToUpper(keyPrefix)+"-") {
-		return nil, errors.New("that does not look like an SDS200 licence key")
-	}
-	rest := key[len(keyPrefix)+1:]
-	parts := strings.Split(rest, "-")
-	if len(parts) != 2 {
-		return nil, errors.New("the key is incomplete")
-	}
-	payload, err := keyEncoding.DecodeString(parts[0])
-	if err != nil {
-		return nil, errors.New("the key is damaged")
-	}
-	sig, err := keyEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, errors.New("the key is damaged")
-	}
-	if licencePublicKey == "" {
-		return nil, errors.New("this build has no licence public key, so keys cannot be checked")
-	}
-	pub, err := hex.DecodeString(licencePublicKey)
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		return nil, errors.New("this build has a malformed licence public key")
-	}
-	if !ed25519.Verify(ed25519.PublicKey(pub), payload, sig) {
-		return nil, errors.New("the key is not valid for this product")
-	}
-	lic, err := decodeLicence(payload)
-	if err != nil {
-		return nil, err
-	}
-	if lic.Product != productTag {
-		return nil, errors.New("that key is for a different product")
-	}
-	return lic, nil
-}
-
-// encodeLicence packs the payload compactly so keys stay short enough to type.
-func encodeLicence(l Licence) ([]byte, error) {
-	if l.Licensee == "" {
-		return nil, errors.New("a licence needs a licensee name")
-	}
-	b := []byte{1}
-	b = appendString(b, l.Product)
-	b = appendString(b, l.Licensee)
-	b = appendString(b, l.Email)
-	b = appendString(b, l.Order)
-	b = binary.BigEndian.AppendUint32(b, uint32(l.Issued.Unix()))
-	var exp uint32
-	if !l.Expires.IsZero() {
-		exp = uint32(l.Expires.Unix())
-	}
-	b = binary.BigEndian.AppendUint32(b, exp)
-	return b, nil
-}
-
-func decodeLicence(b []byte) (*Licence, error) {
-	if len(b) < 1 || b[0] != 1 {
-		return nil, errors.New("unsupported key version")
-	}
-	p := b[1:]
-	var l Licence
-	var err error
-	if l.Product, p, err = takeString(p); err != nil {
-		return nil, err
-	}
-	if l.Licensee, p, err = takeString(p); err != nil {
-		return nil, err
-	}
-	if l.Email, p, err = takeString(p); err != nil {
-		return nil, err
-	}
-	if l.Order, p, err = takeString(p); err != nil {
-		return nil, err
-	}
-	if len(p) < 8 {
-		return nil, errors.New("the key is truncated")
-	}
-	l.Issued = time.Unix(int64(binary.BigEndian.Uint32(p[:4])), 0)
-	if exp := binary.BigEndian.Uint32(p[4:8]); exp != 0 {
-		l.Expires = time.Unix(int64(exp), 0)
-	}
-	return &l, nil
-}
-
-func appendString(b []byte, s string) []byte {
-	if len(s) > 255 {
-		s = s[:255]
-	}
-	return append(append(b, byte(len(s))), s...)
-}
-
-func takeString(b []byte) (string, []byte, error) {
-	if len(b) < 1 {
-		return "", nil, errors.New("the key is truncated")
-	}
-	n := int(b[0])
-	if len(b) < 1+n {
-		return "", nil, errors.New("the key is truncated")
-	}
-	return string(b[1 : 1+n]), b[1+n:], nil
 }
 
 // ------------------------------------------------------------- HTTP surface

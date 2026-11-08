@@ -394,3 +394,42 @@ if($('#memSearchForm'))$('#memSearchForm').onsubmit=async e=>{
 };
 setInterval(()=>{if(activePage===3)memIndexStatus()},3000);
 setTimeout(memIndexStatus,1800);
+
+// ---- Trial and licence ----------------------------------------------------
+async function licenceStatus(){
+  if(!$('#licState'))return;
+  try{
+    const d=await api('/api/licence');
+    const buy=$('#licBuy');
+    if(d.licensed){
+      text('#licState',`Licensed to ${d.licensee}${d.expires?` until ${d.expires}`:' — no expiry'}`);
+      text('#licDetail',`Issued ${d.issued||'—'}. Installation ${d.installation}.`);
+      buy.hidden=true;
+    }else if(d.allowed){
+      const left=Math.max(0,d.days_left??0);
+      text('#licState',`Trial: ${left} day${left===1?'':'s'} left of ${d.trial_days}`);
+      text('#licDetail',`Control stops on ${new Date(d.trial_ends).toLocaleDateString()}. A key is ${d.price} once. Installation ${d.installation}.`);
+      buy.hidden=!d.buy_url;
+    }else{
+      text('#licState',d.reason||'Not licensed');
+      text('#licDetail',`Reading status still works. A key is ${d.price} once. Installation ${d.installation}.`);
+      buy.hidden=!d.buy_url;
+    }
+    if(d.buy_url)buy.onclick=()=>window.open(d.buy_url,'_blank','noopener');
+    if(!d.keys_enabled)text('#licDetail',`${$('#licDetail').textContent} This build has no licence public key, so keys cannot be checked.`);
+    return d;
+  }catch(e){text('#licState',e.message)}
+}
+if($('#licRefresh'))$('#licRefresh').onclick=licenceStatus;
+if($('#licActivate'))$('#licActivate').onclick=async()=>{
+  const key=$('#licKey').value.trim();
+  if(!key){text('#licDetail','Paste the key from your purchase email or the checkout page.');return}
+  try{
+    const d=await api('/api/licence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})});
+    log(`Licence activated for ${d.licensee}`,'INFO','LICENCE');
+    $('#licKey').value='';
+    licenceStatus();
+  }catch(e){text('#licDetail',e.message);log(`Activation failed: ${e.message}`,'WARN','LICENCE')}
+};
+setTimeout(licenceStatus,900);
+setInterval(()=>{if(activePage===9)licenceStatus()},30000);
