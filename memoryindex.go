@@ -352,24 +352,19 @@ func (m *MemIndex) search(q string, limit int, all bool) []MemEntry {
 }
 
 // wordHit reports whether word appears in text. Exact search matches anywhere,
-// which is what an operator typing part of a name expects; loose search only
-// matches the start of a word, so a short fragment cannot drag in unrelated
-// entries.
+// which is what an operator typing part of a name expects. Loose search needs
+// the whole word: it only has to match one word of the query, so "road" must
+// not pull in "ROADPHONE" or "Broadway".
 func wordHit(text, word string, anywhere bool) bool {
 	if anywhere {
 		return strings.Contains(text, word)
 	}
-	for i := 0; i+len(word) <= len(text); i++ {
-		if i > 0 && isWordByte(text[i-1]) {
-			continue
-		}
-		if text[i:i+len(word)] == word {
+	for _, tok := range strings.FieldsFunc(text, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9')
+	}) {
+		if tok == word {
 			return true
 		}
 	}
 	return false
-}
-
-func isWordByte(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }

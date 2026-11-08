@@ -251,9 +251,7 @@ func TestLooseSearchDoesNotMatchInsideWords(t *testing.T) {
 	if len(got) == 0 || got[0].Index != "3" {
 		t.Fatalf("loose search ranked the wrong entry first: %+v", got)
 	}
-	for _, e := range got {
-		if e.Name == "RN Broadway Ops" {
-			t.Fatal("\"road\" matched inside \"Broadway\"")
-		}
+	if len(got) != 1 {
+		t.Fatalf("\"road\" matched inside another word: %+v", got)
 	}
 }
