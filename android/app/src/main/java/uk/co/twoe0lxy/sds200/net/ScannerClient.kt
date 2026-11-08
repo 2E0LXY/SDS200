@@ -212,23 +212,42 @@ class ScannerClient(
         val before = gsi()
         if (scope.current(before) == enabled) return before
         val wire = holdWire(scope, before)
+        var how = wire ?: "keys ${scope.keys.joinToString("+")}"
         if (wire != null) {
             val r = command(wire)
-            if (!Replies.isOk(r.raw, "HLD")) throw ScannerException("Hold not accepted: ${r.raw.trim()}")
+            if (!Replies.isOk(r.raw, "HLD")) throw ScannerException("Hold rejected: ${r.raw.trim()} ($wire)")
         } else {
-            for (k in scope.keys) {
-                keyOnly(k)
-                delay(250)
-            }
+            pressKeys(scope.keys)
         }
-        val deadline = System.currentTimeMillis() + 3500
-        var after: ScannerInfo
+        // GSI lags a hold: channel 0.2-0.4 s, system/department up to 2.4 s
+        // (measured on SDS200E fw 1.23.15).
+        awaitHold(scope, enabled, 2500)?.let { return it }
+        // HLD was accepted but nothing changed - some modes ignore it, so try
+        // the front-panel keys as well before giving up.
+        if (wire != null) {
+            pressKeys(scope.keys)
+            how = "$wire then keys ${scope.keys.joinToString("+")}"
+            awaitHold(scope, enabled, 3000)?.let { return it }
+        }
+        val state = scope.current(gsi())?.let { if (it) "held" else "scanning" } ?: "not reported in this mode"
+        throw ScannerException("${scope.label} hold unchanged - scanner still $state after $how")
+    }
+
+    private suspend fun awaitHold(scope: HoldScope, enabled: Boolean, budgetMs: Long): ScannerInfo? {
+        val deadline = System.currentTimeMillis() + budgetMs
         do {
             delay(200)
-            after = gsi()
-            if (scope.current(after) == enabled) return after
+            val now = gsi()
+            if (scope.current(now) == enabled) return now
         } while (System.currentTimeMillis() < deadline)
-        throw ScannerException("Scanner did not confirm ${scope.label} hold")
+        return null
+    }
+
+    private suspend fun pressKeys(keys: List<Char>) {
+        for (k in keys) {
+            keyOnly(k)
+            delay(250)
+        }
     }
 
     private fun holdWire(scope: HoldScope, i: ScannerInfo): String? = when (scope) {

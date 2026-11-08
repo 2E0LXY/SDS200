@@ -177,7 +177,9 @@ fun LiveScreen(onOpenSettings: () -> Unit) {
                     FilterChip(
                         selected = held,
                         onClick = { vm.toggleHold(scope) },
-                        enabled = vm.pendingHold == null && i != null,
+                        // A scope the current mode does not report (e.g. Site in a
+                        // conventional system) cannot be held.
+                        enabled = vm.pendingHold == null && i?.let { scope.current(it) } != null,
                         label = { Text(if (vm.pendingHold == scope) "${scope.label}…" else scope.label) },
                     )
                 }
