@@ -12,3 +12,5 @@ cmd/licence-server/sds200licenceserver
 licence-server
 licences.db*
 *.key
+Claude outputs/
+*.apk

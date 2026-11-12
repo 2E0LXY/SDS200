@@ -39,8 +39,6 @@ Interpreting the operator:
 
 // aiTools builds the tool set bound to this App.
 func (a *App) aiTools() []AITool {
-	hz := func(mhz float64) int { return int(mhz*1e6 + 0.5) }
-
 	return []AITool{
 		{
 			Name:        "get_status",
@@ -207,21 +205,7 @@ func (a *App) aiTools() []AITool {
 			}, "mode"),
 			Writes: true,
 			Run: func(args map[string]any) (any, error) {
-				m := map[string]string{
-					"scan": "SCN_MODE", "close_call": "CC_MODE", "weather": "WX_MODE", "tone_out": "FTO_MODE",
-					"custom_search": "CTM_MODE", "quick_search": "QSH_MODE", "waterfall": "WF_MODE",
-					"conventional_discovery": "CDIS_MODE", "trunking_discovery": "TDIS_MODE",
-				}[strings.ToLower(argString(args, "mode"))]
-				if m == "" {
-					return nil, fmt.Errorf("unknown mode")
-				}
-				wire := "JPM," + m + "," + argString(args, "index")
-				if _, err := a.execWrite(wire, 2500*time.Millisecond); err != nil {
-					return nil, err
-				}
-				a.invalidateState()
-				time.Sleep(600 * time.Millisecond)
-				return a.readState(true), nil
+				return a.setMode(argString(args, "mode"), argString(args, "index"))
 			},
 		},
 		{
@@ -231,15 +215,10 @@ func (a *App) aiTools() []AITool {
 			Writes:      true,
 			Run: func(args map[string]any) (any, error) {
 				f, ok := argFloat(args, "mhz")
-				if !ok || f < 25 || f > 1300 {
-					return nil, fmt.Errorf("frequency must be 25-1300 MHz")
+				if !ok {
+					return nil, fmt.Errorf("mhz is required")
 				}
-				if _, err := a.execWrite(fmt.Sprintf("QSH,%d", hz(f)), 2500*time.Millisecond); err != nil {
-					return nil, err
-				}
-				a.invalidateState()
-				time.Sleep(500 * time.Millisecond)
-				return a.readState(true), nil
+				return a.tuneFrequency(f)
 			},
 		},
 		{
@@ -312,18 +291,15 @@ func (a *App) aiTools() []AITool {
 			Description: "Favourites quick keys 00-99 and whether each exists and is enabled.",
 			Parameters:  schema(map[string]any{}),
 			Run: func(args map[string]any) (any, error) {
-				res, err := a.command("FQK", 1500*time.Millisecond)
+				set, err := a.quickKeys("fqk", 0, 0)
 				if err != nil {
 					return nil, err
 				}
-				f := packetFields(res.Raw, "FQK")
 				out := []map[string]any{}
-				for i, s := range f {
-					n, _ := strconv.Atoi(strings.TrimSpace(s))
-					if n == 0 {
-						continue
+				for i, n := range set.States {
+					if n != 0 {
+						out = append(out, map[string]any{"key": fmt.Sprintf("%02d", i), "enabled": n == 2})
 					}
-					out = append(out, map[string]any{"key": fmt.Sprintf("%02d", i), "enabled": n == 2})
 				}
 				return map[string]any{"assigned": out}, nil
 			},
@@ -336,30 +312,10 @@ func (a *App) aiTools() []AITool {
 			Run: func(args map[string]any) (any, error) {
 				k, ok := argInt(args, "key")
 				on, ok2 := argBool(args, "enabled")
-				if !ok || !ok2 || k < 0 || k > 99 {
+				if !ok || !ok2 {
 					return nil, fmt.Errorf("key must be 0-99 and enabled true/false")
 				}
-				res, err := a.command("FQK", 1500*time.Millisecond)
-				if err != nil {
-					return nil, err
-				}
-				f := packetFields(res.Raw, "FQK")
-				if len(f) < 100 {
-					return nil, fmt.Errorf("unexpected FQK reply")
-				}
-				states := make([]int, 100)
-				for i := 0; i < 100; i++ {
-					states[i], _ = strconv.Atoi(strings.TrimSpace(f[i]))
-				}
-				if states[k] == 0 {
-					return nil, fmt.Errorf("quick key %02d is not assigned to any favourites list", k)
-				}
-				if on {
-					states[k] = 2
-				} else {
-					states[k] = 1
-				}
-				if _, err := a.execWrite("FQK,"+joinInts(states), 2*time.Second); err != nil {
+				if err := a.setFavouriteQuickKey(k, on); err != nil {
 					return nil, err
 				}
 				return map[string]any{"key": fmt.Sprintf("%02d", k), "enabled": on}, nil

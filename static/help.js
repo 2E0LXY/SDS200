@@ -20,17 +20,19 @@ const HELP_SECTIONS = {
   'Scanner Memory':
     'What is programmed in the radio: searchable once indexed, and browsable level by level. Clicking a channel or talkgroup tunes the scanner to it and holds.',
   'Scan Setup':
-    'What the scanner listens to: which favourites lists and quick keys are live, which service types are enabled, and where it thinks it is. Change these when you are hearing the wrong things, or nothing.',
+    'What the scanner listens to: which favourites lists and quick keys are live, which service types are enabled, and where it is and how far it reaches. Change these when you are hearing the wrong things, or nothing.',
   'Search Close Call and Weather':
-    'Finding activity that is not programmed: band and custom searches, Close Call for strong nearby transmitters, weather monitoring and tone-out standby. Most of these are scanner-menu functions, opened from here.',
+    'Leaving normal scanning: jump to an operating mode, tune straight to one frequency, or go looking for activity that is not programmed with searches, Close Call, weather and tone-out. Scan under Scanner Mode brings you back.',
   'Analyze Discovery and Waterfall':
     'Measurement rather than listening: signal and decode quality, channel activity, LCN discovery, an RF power plot and the waterfall. These take the radio out of normal scanning while they run.',
   'Audio and Recording':
     'Hearing the scanner on this device, and keeping a copy. The scanner serves one audio stream at a time, so starting it here stops anyone else listening.',
   'Scanner Settings':
-    'Display, reception helpers and general configuration. Anything the remote protocol cannot set safely is opened in the scanner’s own menu instead of being faked here.',
+    'How the radio behaves rather than what it listens to: display, reception helpers, the clock, GPS and general configuration. Anything the remote protocol cannot set safely is opened in the scanner’s own menu instead of being faked here.',
   'System and Diagnostics':
-    'The plumbing: finding the radio, where it thinks it is, the assistant, the licence, who holds control, and the logs you would send if something misbehaves.',
+    'The plumbing of this app rather than the radio: finding the scanner, the licence, who holds control, and the logs you would send if something misbehaves.',
+  'Assistant':
+    'Control in plain English. It reads the radio and uses the same confirmed commands as the buttons on the other pages, so anything it does can also be done, and checked, by hand.',
 };
 
 const HELP_CARDS = {
@@ -106,33 +108,34 @@ const HELP_CARDS = {
     why: 'If a list is not being monitored, nothing in it will ever be heard, however it is programmed.',
     how: 'Press Refresh to re-read from the scanner.',
   },
-  'FRONT PANEL|Service Types': {
-    what: 'The scanner’s own Service Types selection screen.',
-    why: 'Service types filter the database by what a channel is for. Turning off the ones you never want cuts a great deal of noise.',
-    how: 'Press Open Service Types and choose on the scanner. The live grid lower down does the same thing directly.',
-  },
-  'DIRECT|Service Types': {
+  'Service Types': {
     what: 'Live readback of every service type, with a toggle for each.',
     why: 'Same effect as the scanner’s menu, without leaving the browser, and the radio is re-read after every change so the display cannot drift from reality.',
-    how: 'Tap a type to toggle it. Only the types this radio actually has are listed, which is why a name you expect may not appear.',
+    how: 'Tap a type to toggle it. Only the types this radio actually has are listed, which is why a name you expect may not appear. Open on scanner shows the radio’s own selection screen instead.',
   },
-  'Location & Range': {
-    what: 'The scanner’s own location and range screens.',
-    why: 'The database is filtered by where the radio thinks it is and how far it should reach; a wrong location means wrong channels.',
-    how: 'Use the postcode card on the System page for the easy route. These buttons open the radio’s own screens for anything they do not cover.',
+
+  'System & Department Quick Keys': {
+    what: 'The quick keys below favourites level: systems inside a favourites list, and departments inside a system.',
+    why: 'Lets you see at a glance why one system or department is silent while the rest of the list is scanning.',
+    how: 'Enter a favourites quick key and press Read for its systems; add a system quick key for that system’s departments. This view is read-only: switch them with Change on scanner, under Manage Quick Key Status.',
   },
-  'System / Department / Site Quick Keys': {
-    what: 'Enabling and disabling quick keys below favourites level.',
-    why: 'Lets you mute one system or department without touching the rest of a list.',
-    how: 'Press Open Menu and use Manage Quick Key Status on the scanner.',
-  },
-  'Priority / Close Call / Weather Priority': {
-    what: 'The operational priority toggles.',
-    why: 'Priority interrupts what you are listening to when something more important appears.',
-    how: 'Press the button for the function you want. Three-second long presses cannot be sent over the network, so anything needing one has to be done on the radio itself.',
+  'Priority': {
+    what: 'Priority scan.',
+    why: 'Interrupts what you are listening to when a channel marked as priority becomes active.',
+    how: 'Press Priority to step through the priority modes; More opens the scanner menu for the rest. Close Call and weather priority are on the Search page with their own modes.',
   },
 
   // ---- Search ---------------------------------------------------------
+  'Scanner Mode': {
+    what: 'A direct jump to an operating mode: scan, quick search, custom search, Close Call, weather or tone-out.',
+    why: 'One press instead of walking the menu, and the way back to normal scanning from anywhere.',
+    how: 'Press the mode you want. The radio is re-read afterwards; the Scanner page shows what it is doing. A mode the regional model does not have is refused by the radio and reported here.',
+  },
+  'Tune to Frequency': {
+    what: 'Tunes the radio to one frequency and holds there, in quick search hold.',
+    why: 'For listening to something you know the frequency of but have not programmed.',
+    how: 'Enter the frequency in MHz, for example 446.00625, and press Tune. The radio works in 100 Hz steps, so the value is rounded to the nearest one. Press Scan under Scanner Mode to resume scanning.',
+  },
   'Quick Search / ID Search': {
     what: 'Func + E/Yes, which is Quick Search from a channel hold and an ID Search toggle while scanning an eligible trunked system.',
     why: 'Quick Search sweeps from the frequency you are on without programming anything.',
@@ -156,7 +159,7 @@ const HELP_CARDS = {
   'Weather': {
     what: 'Weather scan, alerts and SAME programming, where the regional model supports them.',
     why: 'Mostly relevant to North American models; a UK SDS200E has little to show here.',
-    how: 'Press Open Menu. If the options are missing, this radio does not have them.',
+    how: 'WX Priority toggles weather priority; Open Menu has the rest. If the options are missing, this radio does not have them.',
   },
   'Tone-Out': {
     what: 'Tone-out standby and setup, for two-tone paging.',
@@ -234,10 +237,10 @@ const HELP_CARDS = {
     why: 'Set once and forgotten, but worth checking when behaviour seems odd.',
     how: 'Press Open Menu.',
   },
-  'Location / GPS': {
-    what: 'Manual location, saved locations, range, GPS format and the serial port.',
-    why: 'The radio filters the database by location; with a GPS attached it does so continuously.',
-    how: 'Press Open Menu for Set Your Location, or use the postcode card on the System page.',
+  'GPS & Saved Locations': {
+    what: 'Saved locations, GPS format and the serial port a GPS receiver connects to.',
+    why: 'With a GPS attached the radio updates its location continuously, which matters in a vehicle.',
+    how: 'Press Open Menu for Set Your Location. Where the scanner is and how far it reaches is set on the Scan Setup page.',
   },
   'Avoids & Review': {
     what: 'Reviewing and clearing avoided channels, systems, searches and IDs.',
@@ -259,7 +262,7 @@ const HELP_CARDS = {
   'Scanner Location & Range': {
     what: 'Setting the radio’s latitude, longitude and range from a postcode.',
     why: 'The database is filtered by location and range; typing coordinates by hand is awkward and easy to get wrong.',
-    how: 'Enter a postcode, optionally a house number for a more exact position, and a range in miles. Look up resolves it, Set on scanner writes it. Range is distance from the radio, not a frequency range.',
+    how: 'Enter a postcode, optionally a house number for a more exact position, and a range in miles. Look up resolves it, Set on scanner writes it. Range only changes the range and leaves the position alone; Open on scanner shows the radio’s own location screen. Range is distance from the radio, not a frequency range.',
   },
   'Assistant': {
     what: 'Plain-English control: it reads the radio and operates the same commands this page does.',
@@ -314,6 +317,16 @@ const HELP_CONTROLS = {
   '[data-key="Y"]': 'Replay — plays back the last transmissions the scanner buffered.',
   '[data-key="V"]': 'Volume / light — the volume push function. The long press that changes the backlight cannot be sent over the network.',
   '[data-key="Z"]': 'ZIP / location — opens the radio’s location entry.',
+  '[data-func="6"]': 'Weather priority — toggles weather priority (Func + 6).',
+  '[data-func="."]': 'Priority — steps through the priority scan modes (Func + .).',
+  '[data-func="4"]': 'Attenuator for this channel (Func + 4). Left on by mistake it makes the radio seem deaf.',
+  '[data-func="7"]': 'IF exchange (Func + 7) — shifts an internally generated birdie off the channel.',
+  '[data-func="8"]': 'Repeater reverse (Func + 8) — listens on the repeater’s input frequency.',
+  '[data-func="0"]': 'Volume offset for this channel (Func + 0).',
+  '[data-func="5"]': 'Dimmer (Func + 5).',
+  '[data-func="9"]': 'Simple / detail display (Func + 9).',
+  '[data-func="E"]': 'Quick Search from a channel hold, or the ID Search toggle on a trunked system (Func + E).',
+  '#lowerQkRead': 'Reads the system quick keys for that favourites list, or the department quick keys if a system quick key is given.',
   '[data-func="Z"]': 'Service types — opens the scanner’s service type selection (Func + the service key).',
   '[data-range]': 'Range — how far from the radio’s location the database is used, in miles. Not a frequency range.',
   '[data-key="<"]': 'Rotary left — one step anticlockwise.',

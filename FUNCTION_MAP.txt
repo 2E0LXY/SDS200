@@ -58,6 +58,33 @@ Other direct commands used
   DTM / DTM,0,Y,M,D,h,m,s   Clock read / sync
   LCR / LCR,<lat>,<lon>,<range miles>   Location and scan range
   GLT,FL|SYS|DEPT|SITE|CFREQ|TGID       Memory browser
+  JPM,<mode>,<index>        Jump to a mode: SCN_MODE, QSH_MODE, CTM_MODE, CC_MODE,
+                            WX_MODE, FTO_MODE, WF_MODE, CDIS_MODE, TDIS_MODE
+  QSH,<frequency>           Tune and hold. The unit is 100 Hz: 406.0000 MHz is
+                            4060000. (The assistant used to send Hz, which asked
+                            for a frequency 100 times too high.)
+  SQK,<fav>                 System quick keys inside a favourites quick key (read)
+  DQK,<fav>,<sys>           Department quick keys inside a system quick key (read)
+                            SQK/DQK are read-only in the app until their write
+                            form has been checked against a radio.
+
+Where each function lives in the web app
+----------------------------------------
+  Scanner     what is being heard now; holds, avoid, previous / next
+  Control     the whole front panel and the scanner's own menu
+  Memory      search and browse what is programmed; click to tune
+  Scan Setup  favourites / system / department quick keys, lists to monitor,
+              service types, location and range, priority
+  Search      mode jump, tune to a frequency, searches, Close Call, weather,
+              tone-out
+  Analyze     waterfall, system status, activity, LCN finder, RF power, discovery
+  Audio       live audio, scanner and web-app recording, replay
+  Settings    display, reception helpers, clock, GPS, avoids, general
+  System      discovery, licence, operator control, logs
+  Assistant   plain-English control over the same commands
+Each control appears once outside the Dashboard, which is a deliberate summary
+of the other pages. Operations shared by a button and an assistant tool are
+implemented once, in control.go.
   AST / APR                 Analyse start / pause
   URC,0|1                   Scanner SD recording
   JPM,WF_MODE / JPM,SCN_MODE, GWF,1,ON/OFF, PWF,1,OFF   Waterfall

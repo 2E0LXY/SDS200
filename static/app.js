@@ -81,11 +81,21 @@ async function nav(direction){const target=channelNavTarget();if(!target||stateC
 $('#liveNext').onclick=()=>nav('next');$('#livePrevious').onclick=()=>nav('previous');
 $('#dashHold').onclick=()=>setHold('channel',!held(stateCache.channel_hold));$('#dashNext').onclick=()=>nav('next');$('#dashPrevious').onclick=()=>nav('previous');
 
-function renderFqk(){const g=$('#fqkGrid');g.innerHTML='';fqk.forEach((st,i)=>{const b=document.createElement('button');b.textContent=String(i).padStart(2,'0');b.dataset.state=st;b.title=fqkEditMode?`Edit FQK ${i}`:`Open memory assigned to FQK ${i}`;b.disabled=st===0;if(fqkEditMode){b.onclick=async()=>{const old=fqk[i];fqk[i]=old===2?1:2;renderFqk();try{await control('/api/fqk',{states:fqk});log(`FQK ${String(i).padStart(2,'0')} ${fqk[i]===2?'ON':'OFF'}`);await loadFqk()}catch(e){log(e.message);fqk[i]=old;renderFqk()}}}else{b.onclick=()=>memoryByQuickKey(i)}g.appendChild(b)})}
-function renderDashFqk(){const g=$('#dashFqkGrid');if(!g)return;g.innerHTML='';fqk.slice(0,20).forEach((st,i)=>{const b=document.createElement('button');b.textContent=`${String(i).padStart(2,'0')} ${st===2?'ON':st===1?'OFF':'—'}`;b.dataset.state=st;b.disabled=st===0;b.title=st===0?`FQK ${i} not assigned`:`Toggle FQK ${i}`;b.onclick=async()=>{if(st===0)return;const old=fqk[i];fqk[i]=old===2?1:2;renderFqk();renderDashFqk();try{await control('/api/fqk',{states:fqk});log(`FQK ${String(i).padStart(2,'0')} ${fqk[i]===2?'ON':'OFF'}`);await loadFqk()}catch(e){fqk[i]=old;renderFqk();renderDashFqk();log(e.message)}};g.appendChild(b)})}
+// One place switches a favourites quick key, whichever grid was clicked, and
+// it only does so when editing has been switched on: a quick key changes what
+// the scanner listens to, so a stray click must not do it.
+async function toggleFqk(i){
+  const old=fqk[i];
+  if(old===0)return;
+  fqk[i]=old===2?1:2;renderFqk();renderDashFqk();
+  try{await control('/api/fqk',{states:fqk});log(`FQK ${String(i).padStart(2,'0')} ${fqk[i]===2?'ON':'OFF'}`);await loadFqk()}
+  catch(e){fqk[i]=old;renderFqk();renderDashFqk();log(e.message)}
+}
+function renderFqk(){const g=$('#fqkGrid');g.innerHTML='';fqk.forEach((st,i)=>{const b=document.createElement('button');b.textContent=String(i).padStart(2,'0');b.dataset.state=st;b.title=fqkEditMode?`Switch FQK ${i} ${st===2?'off':'on'}`:`Open memory assigned to FQK ${i}`;b.disabled=st===0;b.onclick=()=>fqkEditMode?toggleFqk(i):memoryByQuickKey(i);g.appendChild(b)})}
+function renderDashFqk(){const g=$('#dashFqkGrid');if(!g)return;g.innerHTML='';fqk.slice(0,20).forEach((st,i)=>{const b=document.createElement('button');b.textContent=`${String(i).padStart(2,'0')} ${st===2?'ON':st===1?'OFF':'—'}`;b.dataset.state=st;b.disabled=st===0;b.title=st===0?`FQK ${i} not assigned`:(fqkEditMode?`Switch FQK ${i} ${st===2?'off':'on'}`:'Open Scan Setup to enable quick key editing');b.onclick=()=>{if(fqkEditMode)toggleFqk(i);else{goToPage(4);log('Press “Enable FQK editing” on Scan Setup before switching quick keys')}};g.appendChild(b)})}
 async function loadFqk(){try{const d=await api('/api/fqk');if(d.states?.length===100)fqk=d.states;renderFqk();renderDashFqk()}catch(e){log(`FQK: ${e.message}`)}}
 $('#refreshFqk').onclick=loadFqk;
-$('#fqkEditMode').onclick=()=>{fqkEditMode=!fqkEditMode;$('#fqkEditMode').textContent=fqkEditMode?'Disable FQK editing':'Enable FQK editing';log(fqkEditMode?'FQK editing enabled':'FQK editing disabled');renderFqk()};
+$('#fqkEditMode').onclick=()=>{fqkEditMode=!fqkEditMode;$('#fqkEditMode').textContent=fqkEditMode?'Disable FQK editing':'Enable FQK editing';log(fqkEditMode?'FQK editing enabled':'FQK editing disabled');renderFqk();renderDashFqk()};
 async function loadFavorites(){try{const d=await api('/api/favorites');const rows=(d.records||[]).filter(r=>r.Name||r.name);const out=$('#favoritesList');out.innerHTML='';if(!rows.length){out.innerHTML='<div class="empty">No named favorites returned.</div>'}else{rows.slice(0,100).forEach(r=>{const el=document.createElement('div');el.className='list-row memory-row';el.innerHTML=`<span class="led"></span><div><strong>${escapeHtml(r.Name||r.name)}</strong><div class="notice">${escapeHtml(r.tag||'Favorite')} • Monitor ${escapeHtml(r.Monitor||'')}</div></div><span>${escapeHtml(r.Q_Key??r.QKey??'')}</span>`;el.onclick=()=>memoryShow({type:'level',kind:'SYS',parent:String(r.Index),title:r.Name||'Favorite'});out.appendChild(el)})}
   const dash=$('#dashFavorites');dash.innerHTML='';const active=rows.filter(r=>String(r.Monitor||'').toLowerCase()!=='off').slice(0,3);if(!active.length){dash.innerHTML='<div class="empty">No active monitor lists reported.</div>'}else active.forEach(r=>{const el=document.createElement('div');el.className='dash-monitor-row';el.innerHTML=`<i></i><strong>${escapeHtml(r.Name||r.name)}</strong><span>QK ${escapeHtml(r.Q_Key??r.QKey??'—')}</span>`;el.onclick=()=>{memoryShow({type:'level',kind:'SYS',parent:String(r.Index),title:r.Name||'Favorite'});goToPage(3)};dash.appendChild(el)})
 }catch(e){log(`Favorites: ${e.message}`)}}
@@ -532,3 +542,49 @@ if($('#licActivate'))$('#licActivate').onclick=async()=>{
 };
 setTimeout(licenceStatus,900);
 setInterval(()=>{if(activePage===9)licenceStatus()},30000);
+
+
+// ---- Scanner mode and direct tuning (Search page) --------------------------
+$$('[data-mode]').forEach(b=>b.onclick=async()=>{
+  const label=b.textContent.trim();
+  try{
+    text('#modeState',`Switching to ${label}…`);
+    await control('/api/mode',{mode:b.dataset.mode});
+    text('#modeState',`${label} requested; the Scanner page shows what the radio is doing now.`);
+    log(`Mode: ${label}`,'INFO','CONTROL');
+    refresh(true);
+  }catch(e){text('#modeState',e.message);log(`Mode ${label}: ${e.message}`,'WARN','CONTROL')}
+});
+if($('#tuneForm'))$('#tuneForm').onsubmit=async e=>{
+  e.preventDefault();
+  const mhz=Number($('#tuneMHz').value);
+  if(!(mhz>=25&&mhz<=1300)){text('#tuneState','Enter a frequency between 25 and 1300 MHz.');return}
+  try{
+    text('#tuneState',`Tuning ${mhz} MHz…`);
+    await control('/api/tune',{mhz});
+    text('#tuneState',`Holding on ${mhz} MHz. Press Scan under Scanner Mode to go back to scanning.`);
+    log(`Tuned to ${mhz} MHz`,'INFO','CONTROL');
+    refresh(true);
+  }catch(e){text('#tuneState',e.message);log(`Tune: ${e.message}`,'WARN','CONTROL')}
+};
+
+// ---- System and department quick keys (read-only view) ---------------------
+if($('#lowerQkRead'))$('#lowerQkRead').onclick=async()=>{
+  const fav=$('#sqkFav').value.trim(),sys=$('#dqkSys').value.trim();
+  const grid=$('#lowerQkGrid');
+  if(fav===''){text('#lowerQkState','Enter the favourites quick key first.');return}
+  const dept=sys!=='';
+  const q=new URLSearchParams(dept?{kind:'dqk',fav,sys}:{kind:'sqk',fav});
+  try{
+    const d=await api(`/api/quick-keys?${q}`);
+    grid.innerHTML='';
+    d.states.forEach((st,i)=>{
+      const b=document.createElement('button');
+      b.textContent=String(i).padStart(2,'0');b.dataset.state=st;b.disabled=true;
+      b.title=st===0?'Not assigned':(st===2?'Enabled':'Disabled');
+      grid.appendChild(b);
+    });
+    const used=d.states.filter(x=>x!==0).length,on=d.states.filter(x=>x===2).length;
+    text('#lowerQkState',`${dept?`Department quick keys in favourites ${fav}, system ${sys}`:`System quick keys in favourites ${fav}`}: ${used} assigned, ${on} enabled. Green = enabled, grey = disabled, dim = not assigned.`);
+  }catch(e){grid.innerHTML='';text('#lowerQkState',e.message)}
+};

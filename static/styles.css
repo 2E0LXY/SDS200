@@ -67,3 +67,8 @@ details.help dd{margin:0;color:var(--text,#dde3ea)}
 .help-toggle.on{border-color:var(--accent,#7cc4ff);color:var(--accent,#7cc4ff)}
 @media (max-width:640px){details.help dl{grid-template-columns:1fr}details.help dt{margin-top:6px}}
 .audio-volume{margin:10px 0 2px;max-width:420px}
+/* Help sits under a card's content on a row of its own, never as a third
+   column squeezed beside the buttons. */
+.function-card{flex-wrap:wrap}
+.function-card>div:first-child{flex:1 1 240px}
+.function-card>details.help{flex:1 0 100%;margin-top:0}

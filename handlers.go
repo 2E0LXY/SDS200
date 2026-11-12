@@ -638,31 +638,15 @@ func wireValue(v any) string {
 }
 
 func (a *App) apiFQK(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		res, err := a.command("FQK", 1500*time.Millisecond)
+	switch r.Method {
+	case "GET":
+		set, err := a.quickKeys("fqk", 0, 0)
 		if err != nil {
 			errJSON(w, err)
 			return
 		}
-		f := packetFields(res.Raw, "FQK")
-		states := make([]int, 0, 100)
-		for _, s := range f {
-			if len(states) >= 100 {
-				break
-			}
-			n, e := strconv.Atoi(strings.TrimSpace(s))
-			if e != nil {
-				n = 0
-			}
-			states = append(states, n)
-		}
-		for len(states) < 100 {
-			states = append(states, 0)
-		}
-		writeJSON(w, 200, map[string]any{"command": "FQK", "raw": res.Raw, "elapsed_ms": res.ElapsedMS, "states": states})
-		return
-	}
-	if r.Method == "POST" {
+		writeJSON(w, 200, map[string]any{"command": "FQK", "raw": set.Raw, "elapsed_ms": set.Elapsed, "states": set.States})
+	case "POST":
 		if err := a.requireControl(r); err != nil {
 			errJSON(w, err)
 			return
@@ -674,27 +658,16 @@ func (a *App) apiFQK(w http.ResponseWriter, r *http.Request) {
 			errJSON(w, err)
 			return
 		}
-		if len(b.States) != 100 {
-			errJSON(w, &httpError{422, "FQK requires exactly 100 states"})
-			return
-		}
-		for _, v := range b.States {
-			if v < 0 || v > 2 {
-				errJSON(w, &httpError{422, "FQK states must be 0/1/2"})
-				return
-			}
-		}
-		a.log.Info("CONTROL", "Favorites Quick Keys write", map[string]any{"count": 100})
-		d, err := a.execWrite("FQK,"+joinInts(b.States), 2*time.Second)
+		d, err := a.writeFavouriteQuickKeys(b.States)
 		if err != nil {
 			errJSON(w, err)
 			return
 		}
 		writeJSON(w, 200, d)
-		return
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		writeJSON(w, 405, map[string]any{"detail": "method not allowed"})
 	}
-	w.Header().Set("Allow", "GET, POST")
-	writeJSON(w, 405, map[string]any{"detail": "method not allowed"})
 }
 func joinInts(xs []int) string {
 	p := make([]string, len(xs))
