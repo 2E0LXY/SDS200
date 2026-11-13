@@ -131,10 +131,15 @@ const HELP_CARDS = {
     why: 'One press instead of walking the menu, and the way back to normal scanning from anywhere.',
     how: 'Press the mode you want. The radio is re-read afterwards; the Scanner page shows what it is doing. A mode the regional model does not have is refused by the radio and reported here.',
   },
+  'Frequency Directory': {
+    what: 'Your own lists of who uses which frequency, searchable by name, place, ICAO code or frequency.',
+    why: 'The scanner only knows what is programmed into it. The directory answers "what is Leeds Bradford Tower on?" for anything in your lists, and lets you listen without programming anything.',
+    how: 'Import list adds CSV files: a Radio Reference UK export, a live log or a repeater list all work, and they stay on this computer. Search, then click a row to tune it. Scan these steps the radio through everything found and stops on whichever is active; it holds the radio until you press Stop scan, and takes at most 60 frequencies. If a warning says the scanner tuned a different frequency, its Band Defaults need correcting on the radio.',
+  },
   'Tune to Frequency': {
     what: 'Tunes the radio to one frequency and holds there, in quick search hold.',
     why: 'For listening to something you know the frequency of but have not programmed.',
-    how: 'Enter the frequency in MHz and press Tune. The scanner snaps to the step set for that band, so a frequency between steps lands on the nearest one: 446.00625 becomes 446.0125 on a 12.5 kHz band. The card tells you what it actually tuned. For an exact off-step frequency, set a finer step under Band Defaults on the scanner, or program it as a channel. Press Scan under Scanner Mode to resume scanning.',
+    how: 'Enter the frequency in MHz and press Tune. The scanner snaps to the step set for that band, so a frequency between steps lands on the nearest one: 446.00625 becomes 446.0125 on a 12.5 kHz band. The card tells you what it actually tuned. For an exact off-step frequency, set a finer step under Band Defaults on the scanner, or program it as a channel. Press Scan under Scanner Mode to resume scanning. Modulation: leave the list alone to use what the scanner has, or pick AM for airband, NFM for most land mobile. The scanner can only change it the way the front panel does, one step at a time with a pause after each, so it can take up to 20 seconds. A programmed channel takes its modulation from its programming, not from here.',
   },
   'Quick Search / ID Search': {
     what: 'Func + E/Yes, which is Quick Search from a channel hold and an ID Search toggle while scanning an eligible trunked system.',
@@ -326,6 +331,9 @@ const HELP_CONTROLS = {
   '[data-func="5"]': 'Dimmer (Func + 5).',
   '[data-func="9"]': 'Simple / detail display (Func + 9).',
   '[data-func="E"]': 'Quick Search from a channel hold, or the ID Search toggle on a trunked system (Func + E).',
+  '#fdScan': 'Steps the scanner through every frequency found, staying on one while it is active. Holds the radio until stopped.',
+  '#fdStop': 'Ends the directory scan and returns the scanner to its own scan.',
+  '#fdImport': 'Adds CSV lists to the directory. They are kept on this computer and never uploaded anywhere.',
   '#lowerQkRead': 'Reads the system quick keys for that favourites list, or the department quick keys if a system quick key is given.',
   '[data-func="Z"]': 'Service types — opens the scanner’s service type selection (Func + the service key).',
   '[data-range]': 'Range — how far from the radio’s location the database is used, in miles. Not a frequency range.',

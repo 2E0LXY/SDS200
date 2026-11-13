@@ -46,6 +46,11 @@ func (a *App) setMode(mode, index string) (map[string]any, error) {
 	if strings.ContainsAny(index, ",\r\n") {
 		return nil, &httpError{422, "the mode index cannot contain a comma or a line break"}
 	}
+	if a.dirScan != nil && a.dirScan.Running() && target != "QSH_MODE" {
+		// Called from DirScan.Stop itself once the loop has ended, so this
+		// only fires for an operator's own mode change.
+		a.dirScan.Stop(false)
+	}
 	a.prepareForWrite()
 	a.log.Info("CONTROL", "Mode change requested", map[string]any{"mode": target, "index": index})
 	if _, err := a.execWrite("JPM,"+target+","+index, 2500*time.Millisecond); err != nil {
@@ -67,31 +72,131 @@ func qshUnits(mhz float64) (int, error) {
 	return int(math.Round(mhz * 1e4)), nil
 }
 
-// tuneFrequency puts the scanner into quick search hold on one frequency.
-func (a *App) tuneFrequency(mhz float64) (map[string]any, error) {
+// Quick search hold, as GSI reports it.
+var (
+	gsiSrchFreq = regexp.MustCompile(`<SrchFrequency[^>]*\bFreq="([^"]*)"[^>]*\bMod="([^"]*)"`)
+	gsiMute     = regexp.MustCompile(`<Property[^>]*\bMute="([^"]*)"`)
+	gsiSig      = regexp.MustCompile(`<Property[^>]*\bSig="([^"]*)"`)
+)
+
+// searchHold is what the scanner says it is tuned to in quick search hold.
+type searchHold struct {
+	MHz  float64
+	Mod  string // AM, NFM, FM, WFM or FMB
+	Open bool   // squelch open: something is being received
+}
+
+func (a *App) readSearchHold() (searchHold, error) {
+	res, err := a.command("GSI", 1500*time.Millisecond)
+	if err != nil {
+		return searchHold{}, err
+	}
+	var h searchHold
+	m := gsiSrchFreq.FindStringSubmatch(res.Raw)
+	if m == nil {
+		return h, &httpError{409, "the scanner is not in quick search hold"}
+	}
+	h.MHz, _ = parseMHz(m[1])
+	h.Mod = strings.ToUpper(strings.TrimSpace(m[2]))
+	if h.Mod == "WFMB" { // GSI's name for what the menu calls FMB
+		h.Mod = "FMB"
+	}
+	if mm := gsiMute.FindStringSubmatch(res.Raw); mm != nil && strings.EqualFold(mm[1], "Unmute") {
+		h.Open = true
+	}
+	if sm := gsiSig.FindStringSubmatch(res.Raw); sm != nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(sm[1])); err == nil && n > 0 {
+			h.Open = true
+		}
+	}
+	return h, nil
+}
+
+// setSearchModulation makes quick search use one modulation. The only remote
+// way to change it is the front panel's own: FUNC + soft key 3 steps through
+// AM, NFM, FM, WFM, FMB and AUTO, with a popup of about three seconds after
+// each press. So this is slow (up to twenty seconds), and is skipped when the
+// scanner is already on the right one.
+func (a *App) setSearchModulation(want string) error {
+	want = normaliseMode(want)
+	if want == "" {
+		return nil
+	}
+	for press := 0; press < 7; press++ {
+		h, err := a.readSearchHold()
+		if err != nil {
+			return err
+		}
+		if h.Mod == want {
+			return nil
+		}
+		if err := a.funcSequence("C"); err != nil {
+			return err
+		}
+		time.Sleep(350 * time.Millisecond)
+	}
+	return &httpError{502, "the scanner would not switch quick search to " + want}
+}
+
+// tuneFrequency puts the scanner into quick search hold on one frequency, in
+// the given modulation if one is named.
+func (a *App) tuneFrequency(mhz float64, mode string) (map[string]any, error) {
 	units, err := qshUnits(mhz)
 	if err != nil {
 		return nil, err
 	}
+	if a.dirScan != nil {
+		a.dirScan.Stop(false) // a manual tune takes over from a directory scan
+	}
 	a.prepareForWrite()
-	a.log.Info("CONTROL", "Tune requested", map[string]any{"mhz": mhz, "qsh": units})
-	if _, err := a.execWrite(fmt.Sprintf("QSH,%d", units), 2500*time.Millisecond); err != nil {
+	a.log.Info("CONTROL", "Tune requested", map[string]any{"mhz": mhz, "qsh": units, "mode": mode})
+	wire := fmt.Sprintf("QSH,%d", units)
+	if _, err := a.execWrite(wire, 2500*time.Millisecond); err != nil {
 		return nil, err
 	}
+	time.Sleep(400 * time.Millisecond)
+	if normaliseMode(mode) != "" {
+		before, _ := a.readSearchHold()
+		if err := a.setSearchModulation(mode); err != nil {
+			return nil, err
+		}
+		// A different modulation can mean a different step, so tune again.
+		if after, _ := a.readSearchHold(); after.Mod != before.Mod {
+			if _, err := a.execWrite(wire, 2500*time.Millisecond); err != nil {
+				return nil, err
+			}
+			time.Sleep(400 * time.Millisecond)
+		}
+	}
 	a.invalidateState()
-	time.Sleep(500 * time.Millisecond)
 	st := a.readState(true)
-	st["requested_mhz"] = float64(units) / 1e4
-	// The scanner does not tune QSH's frequency exactly: quick search snaps to
-	// the step set for that band, so 446.00625 on a 12.5 kHz band lands on
-	// 446.0125. Say so rather than let the operator think they are on channel.
-	if got, ok := parseMHz(fmt.Sprint(st["frequency"])); ok {
-		st["tuned_mhz"] = got
-		if math.Abs(got-float64(units)/1e4) > 0.00011 {
-			st["note"] = fmt.Sprintf("the scanner tuned %.5f MHz, not %.5f: quick search uses the step set for this band. To reach the exact frequency, set a finer step for the band under Settings > Band Defaults on the scanner, or program it as a channel", got, float64(units)/1e4)
+	want := float64(units) / 1e4
+	st["requested_mhz"] = want
+	if h, err := a.readSearchHold(); err == nil {
+		st["tuned_mhz"], st["tuned_mode"] = h.MHz, h.Mod
+		if note := tuneNote(want, normaliseMode(mode), h); note != "" {
+			st["note"] = note
 		}
 	}
 	return st, nil
+}
+
+// tuneNote says how the scanner fell short of what was asked, if it did. The
+// scanner does not tune QSH's frequency exactly: quick search snaps to the
+// step its Band Defaults give that band, and uses their modulation unless
+// told otherwise. A radio whose band defaults are wrong for the UK - airband
+// set to FMB in 100 kHz steps, as found on one SDS200E - cannot reach most
+// airband channels this way until they are corrected.
+func tuneNote(want float64, wantMode string, h searchHold) string {
+	off := math.Abs(h.MHz-want) > 0.0011
+	wrongMode := wantMode != "" && h.Mod != wantMode
+	switch {
+	case off:
+		return fmt.Sprintf("the scanner tuned %.5f MHz, not %.5f: quick search uses the step its Band Defaults give this band. On the scanner, open Menu > Settings > Band Defaults and give this band the right step (8.33 kHz for civil airband, 25 kHz for military airband, 12.5 or 6.25 kHz for PMR), or program the frequency as a channel", h.MHz, want)
+	case wrongMode:
+		return fmt.Sprintf("the scanner is on %.5f MHz but in %s, not %s", h.MHz, h.Mod, wantMode)
+	}
+	return ""
 }
 
 // parseMHz reads a frequency as the scanner reports it: "446.012500MHz", or a
@@ -482,6 +587,40 @@ func (a *App) apiMode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, d)
 }
 
+// apiModulation changes the modulation of the frequency the scanner is
+// holding in quick search, without retuning it.
+func (a *App) apiModulation(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, "POST") {
+		return
+	}
+	if err := a.requireControl(r); err != nil {
+		errJSON(w, err)
+		return
+	}
+	var b struct {
+		Mode string `json:"mode"`
+	}
+	if err := readJSON(r, &b); err != nil {
+		errJSON(w, err)
+		return
+	}
+	if normaliseMode(b.Mode) == "" {
+		errJSON(w, &httpError{422, "mode must be AM, NFM, FM, WFM or FMB"})
+		return
+	}
+	if _, err := a.readSearchHold(); err != nil {
+		errJSON(w, &httpError{409, "modulation can only be changed while the scanner is holding a tuned frequency. Tune to one first; a programmed channel takes its modulation from its programming"})
+		return
+	}
+	if err := a.setSearchModulation(b.Mode); err != nil {
+		errJSON(w, err)
+		return
+	}
+	h, _ := a.readSearchHold()
+	a.invalidateState()
+	writeJSON(w, 200, map[string]any{"tuned_mhz": h.MHz, "tuned_mode": h.Mod})
+}
+
 func (a *App) apiTune(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, "POST") {
 		return
@@ -491,13 +630,14 @@ func (a *App) apiTune(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b struct {
-		MHz float64 `json:"mhz"`
+		MHz  float64 `json:"mhz"`
+		Mode string  `json:"mode"`
 	}
 	if err := readJSON(r, &b); err != nil {
 		errJSON(w, err)
 		return
 	}
-	d, err := a.tuneFrequency(b.MHz)
+	d, err := a.tuneFrequency(b.MHz, b.Mode)
 	if err != nil {
 		errJSON(w, err)
 		return

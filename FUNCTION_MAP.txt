@@ -86,6 +86,28 @@ app polls GSI until it answers and is out of the menu instead of waiting on MSB.
 SQK,<fav> and DQK,<fav>,<sys> reads return their selector fields followed by
 100 states; confirmed against the radio.
 
+Quick search modulation and step (verified on the SDS200E, 2026-11-13)
+----------------------------------------------------------------------
+QSH takes a frequency only; the extended BCD536-style forms (QSH,f,,AM...) are
+refused with QSH,ERR. The frequency is snapped to the step the scanner's Band
+Defaults give that band, and the modulation is the band default unless changed.
+  FUNC + soft key 3 (KEY,F then KEY,C) in quick search hold steps the
+  modulation: AM > NFM > FM > WFM > FMB > AUTO. Each press raises a popup for
+  about three seconds, during which further keys only dismiss the popup.
+  GSI reports FMB as "WFMB", and reports AUTO as whatever it resolves to.
+A radio whose band defaults are wrong cannot be tuned accurately this way: one
+SDS200E had 108-137 MHz set to FMB in 100 kHz steps, so 134.575 tuned 134.600.
+The app reads back what was tuned and says so; the fix is on the radio, under
+Menu > Settings > Band Defaults.
+
+Frequency directory and directory scan
+--------------------------------------
+<data>/frequencies/*.csv are the operator's own lists (Radio Reference UK
+exports, logs, repeater lists), read at run time and never shipped with the
+app. /api/frequencies searches them; /api/frequencies/scan steps the scanner
+through up to 60 results with QSH, staying on one while GSI shows the squelch
+open (Mute="Unmute" or Sig > 0), about 0.7 s a channel.
+
 Where each function lives in the web app
 ----------------------------------------
   Scanner     what is being heard now; holds, avoid, previous / next

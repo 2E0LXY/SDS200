@@ -54,6 +54,23 @@ answer. Requests need operator control, like any other write.
 Programming favourites (new systems, departments and channels) is not exposed:
 it needs the microSD card, not the LAN protocol. See `docs/FILE_FORMAT.md`.
 
+## Frequency directory
+
+The scanner only knows what is programmed into it. The directory is the
+operator's own lists of who uses which frequency, searchable by name, place,
+ICAO code or frequency from the Search page and by the assistant. A result can
+be tuned, or a whole set scanned: the app steps the radio through them and
+stays on whichever is active, with nothing programmed.
+
+Lists are CSV files with a header row, imported from the Search page or
+dropped into `<data>/frequencies/`. A Radio Reference UK export, a live log
+and a repeater channel list are all read as they come. They are not part of
+this repository and are never uploaded anywhere: most such lists may not be
+republished.
+
+Tuning this way depends on the scanner's Band Defaults being right for the UK;
+if they are not, the app says which frequency the scanner actually tuned.
+
 ## Licence
 
 Control (anything that writes, plus audio and the assistant) is free for 14

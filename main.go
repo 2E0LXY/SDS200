@@ -121,6 +121,8 @@ type App struct {
 	discoveryMessage string
 
 	licence   *LicenceManager
+	freqDir   *FreqDir
+	dirScan   *DirScan
 	memIndex  *MemIndex
 	waterfall *WaterfallHub
 	audio     *AudioHub
@@ -177,6 +179,8 @@ func NewApp() (*App, error) {
 	a.waterfall = NewWaterfallHub(a)
 	a.recorder = NewRecorder(a, filepath.Join(dir, "recordings"))
 	a.memIndex = NewMemIndex(a, dir)
+	a.freqDir = NewFreqDir(dir)
+	a.dirScan = NewDirScan(a)
 	a.licence = NewLicenceManager(dir, lg)
 	a.log.Info("APP", "SDS200 WebApp starting", map[string]any{"version": appVersion, "data_dir": dir, "real_radio_only": true})
 	if cfg.Host != "" {
@@ -187,6 +191,9 @@ func NewApp() (*App, error) {
 	return a, nil
 }
 func (a *App) Close() {
+	if a.dirScan != nil {
+		a.dirScan.Stop(true)
+	}
 	if a.recorder != nil {
 		_ = a.recorder.Stop()
 	}
@@ -429,6 +436,9 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/quick-keys", a.apiQuickKeys)
 	mux.HandleFunc("/api/mode", a.apiMode)
 	mux.HandleFunc("/api/tune", a.apiTune)
+	mux.HandleFunc("/api/modulation", a.apiModulation)
+	mux.HandleFunc("/api/frequencies", a.apiFrequencies)
+	mux.HandleFunc("/api/frequencies/scan", a.apiDirectoryScan)
 	mux.HandleFunc("/api/favorites", a.apiFavorites)
 	mux.HandleFunc("/api/memory", a.apiMemory)
 	mux.HandleFunc("/api/memory/goto", a.apiMemoryGoto)

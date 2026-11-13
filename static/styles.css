@@ -72,3 +72,6 @@ details.help dd{margin:0;color:var(--text,#dde3ea)}
 .function-card{flex-wrap:wrap}
 .function-card>div:first-child{flex:1 1 240px}
 .function-card>details.help{flex:1 0 100%;margin-top:0}
+#tuneForm{grid-template-columns:minmax(0,1fr) minmax(0,auto) auto}
+#tuneForm select{min-width:0;max-width:100%}
+@media(max-width:620px){#tuneForm{grid-template-columns:1fr}}

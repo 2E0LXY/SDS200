@@ -560,8 +560,10 @@ if($('#tuneForm'))$('#tuneForm').onsubmit=async e=>{
   if(!(mhz>=25&&mhz<=1300)){text('#tuneState','Enter a frequency between 25 and 1300 MHz.');return}
   try{
     text('#tuneState',`Tuning ${mhz} MHz…`);
-    const d=await control('/api/tune',{mhz});
-    const got=d.tuned_mhz?`${Number(d.tuned_mhz).toFixed(5)} MHz`:`${mhz} MHz`;
+    const mode=$('#tuneMode')?.value||'';
+    if(mode)text('#tuneState',`Tuning ${mhz} MHz and setting ${mode}; changing modulation can take up to 20 seconds…`);
+    const d=await control('/api/tune',{mhz,mode});
+    const got=d.tuned_mhz?`${Number(d.tuned_mhz).toFixed(5)} MHz${d.tuned_mode?` ${d.tuned_mode}`:''}`:`${mhz} MHz`;
     text('#tuneState',d.note?`${d.note[0].toUpperCase()}${d.note.slice(1)}.`:`Holding on ${got}. Press Scan under Scanner Mode to go back to scanning.`);
     log(d.note?`Tune: asked ${mhz}, scanner tuned ${got}`:`Tuned to ${got}`,d.note?'WARN':'INFO','CONTROL');
     refresh(true);
@@ -611,3 +613,99 @@ function pageSettled(){
   }).catch(e=>log(`Menu: ${e.message}`,'WARN','CONTROL'));
 }
 pages.addEventListener('scroll',()=>{clearTimeout(settleTimer);settleTimer=setTimeout(pageSettled,450)},{passive:true});
+
+
+// ---- Frequency directory: look up who is on what, tune it, or scan a set ---
+let fdQueryShown='',fdCount=0;
+async function fdStatus(){
+  if(!$('#fdState'))return;
+  try{
+    const d=await api('/api/frequencies');
+    text('#fdState',d.entries?`${d.entries.toLocaleString()} frequencies from ${d.files.length} list${d.files.length===1?'':'s'}. These are your own lists; they stay on this computer.`:'No lists yet. Import CSV lists (a Radio Reference UK export, a log, a repeater list) to look frequencies up by name.');
+  }catch(e){text('#fdState',e.message)}
+}
+function fdRow(r){
+  const el=document.createElement('div');
+  el.className='list-row memory-row';
+  const where=[r.place,r.county,r.group,r.miles!=null?`${r.miles} mi`:null].filter(Boolean).join(' • ');
+  const extra=[r.note,r.tone,r.last_heard?`heard ${r.last_heard}`:null].filter(Boolean).join(' • ');
+  el.innerHTML=`<span class="led"></span><div><strong>${escapeHtml(r.name)}</strong><div class="meta">${escapeHtml(where)}</div>${extra?`<div class="meta">${escapeHtml(extra)}</div>`:''}</div><span>${Number(r.mhz).toFixed(5)}<br><small>${escapeHtml(r.mode||'')}</small></span>`;
+  el.title='Click to tune the scanner to this frequency';
+  el.onclick=async()=>{
+    try{
+      text('#fdScanState',`Tuning ${r.name}…`);
+      const d=await control('/api/tune',{mhz:r.mhz,mode:r.mode||''});
+      text('#fdScanState',d.note?`${d.note[0].toUpperCase()}${d.note.slice(1)}.`:`Holding on ${r.name}, ${Number(d.tuned_mhz||r.mhz).toFixed(5)} MHz ${d.tuned_mode||''}. Press Scan under Scanner Mode to go back to scanning.`);
+      log(`Tuned to ${r.name} ${r.mhz}`,'INFO','CONTROL');fdScanStatus();refresh(true);
+    }catch(e){text('#fdScanState',e.message)}
+  };
+  return el;
+}
+if($('#fdForm'))$('#fdForm').onsubmit=async e=>{
+  e.preventDefault();
+  const q=$('#fdQuery').value.trim();if(!q)return;
+  const box=$('#fdResults');box.innerHTML='<div class="empty">Searching…</div>';
+  try{
+    const d=await api(`/api/frequencies?${new URLSearchParams({q,limit:'60'})}`);
+    box.innerHTML='';fdQueryShown='';fdCount=0;$('#fdScan').disabled=true;
+    if(!d.results.length){box.innerHTML=`<div class="empty">${d.directory?`Nothing in the directory matches “${escapeHtml(q)}”.`:'The directory is empty — import a list first.'}</div>`;return}
+    if(d.partial)box.innerHTML='<div class="empty">No entry matches every word; closest matches below. Narrow the search before scanning.</div>';
+    d.results.forEach(r=>box.appendChild(fdRow(r)));
+    if(!d.partial){fdQueryShown=q;fdCount=d.results.length;$('#fdScan').disabled=false;$('#fdScan').textContent=`Scan these (${fdCount})`}
+  }catch(err){box.innerHTML=`<div class="empty">${escapeHtml(err.message)}</div>`}
+};
+async function fdScanStatus(){
+  if(!$('#fdStop'))return;
+  try{
+    const d=await api('/api/frequencies/scan');
+    $('#fdStop').disabled=!d.running;
+    if(d.running){
+      const c=d.current,heard=d.channels.filter(x=>x.hits>0).length;
+      text('#fdScanState',`Scanning “${d.label}”: ${d.channels.length} frequencies, pass ${d.passes+1}. ${c?`${d.receiving?'RECEIVING':'On'} ${c.name} ${Number(c.mhz).toFixed(5)} MHz. `:''}${heard?`Activity on ${heard} so far. `:''}${d.warning?`Warning: ${d.warning}.`:''}`);
+    }else if(d.stopped&&d.stopped!=='stopped'){
+      text('#fdScanState',`Scan ended: ${d.stopped}.`);
+    }
+    return d;
+  }catch(e){}
+}
+if($('#fdScan'))$('#fdScan').onclick=async()=>{
+  if(!fdQueryShown)return;
+  try{
+    text('#fdScanState','Starting…');
+    await control('/api/frequencies/scan',{query:fdQueryShown,limit:60});
+    log(`Directory scan started: ${fdQueryShown} (${fdCount})`,'INFO','CONTROL');fdScanStatus();
+  }catch(e){text('#fdScanState',e.message)}
+};
+if($('#fdStop'))$('#fdStop').onclick=async()=>{
+  try{
+    if(!lease){await acquire()}
+    await api('/api/frequencies/scan',{method:'DELETE',headers:headers(true)});
+    text('#fdScanState','Scan stopped; the scanner is back to its own scan.');
+    log('Directory scan stopped','INFO','CONTROL');fdScanStatus();refresh(true);
+  }catch(e){text('#fdScanState',e.message)}
+};
+if($('#fdImport'))$('#fdImport').onclick=()=>$('#fdFile').click();
+if($('#fdFile'))$('#fdFile').onchange=async e=>{
+  const files=[...e.target.files];let ok=0;
+  for(const f of files){
+    try{
+      const d=await api(`/api/frequencies?${new URLSearchParams({name:f.name})}`,{method:'POST',headers:{'Content-Type':'text/csv'},body:await f.text()});
+      ok++;log(`Imported ${f.name}: ${d.added} new frequencies`,'INFO','DIRECTORY');
+    }catch(err){log(`Import ${f.name}: ${err.message}`,'WARN','DIRECTORY');text('#fdState',`${f.name}: ${err.message}`)}
+  }
+  e.target.value='';
+  if(ok)fdStatus();
+};
+setTimeout(()=>{fdStatus();fdScanStatus()},1200);
+setInterval(()=>{if(activePage===5)fdScanStatus()},1500);
+
+if($('#tuneSetMode'))$('#tuneSetMode').onclick=async()=>{
+  const mode=$('#tuneMode').value;
+  if(!mode){text('#tuneState','Pick a modulation in the list first.');return}
+  try{
+    text('#tuneState',`Setting ${mode}; this can take up to 20 seconds…`);
+    const d=await control('/api/modulation',{mode});
+    text('#tuneState',`Now ${Number(d.tuned_mhz).toFixed(5)} MHz in ${d.tuned_mode}.`);
+    log(`Modulation set to ${d.tuned_mode}`,'INFO','CONTROL');refresh(true);
+  }catch(e){text('#tuneState',e.message)}
+};

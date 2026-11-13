@@ -221,8 +221,16 @@
       </div>
       <div class="card">
         <div class="card-head"><div><span class="cap direct">DIRECT</span><h2>Tune to Frequency</h2><p id="tuneState">Listen on one frequency, in quick search hold.</p></div></div>
-        <form id="tuneForm" class="ai-form"><input id="tuneMHz" type="number" inputmode="decimal" min="25" max="1300" step="0.00001" placeholder="MHz — e.g. 446.00625" /><button type="submit">Tune</button></form>
+        <form id="tuneForm" class="ai-form"><input id="tuneMHz" type="number" inputmode="decimal" min="25" max="1300" step="0.00001" placeholder="MHz — e.g. 446.00625" /><select id="tuneMode" aria-label="Modulation"><option value="">Modulation: as the scanner has it</option><option>AM</option><option>NFM</option><option>FM</option><option>WFM</option><option>FMB</option></select><button type="submit">Tune</button></form>
+        <div class="action-row"><button id="tuneSetMode" type="button">Change modulation of the tuned frequency</button></div>
       </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><div><span class="cap direct">DIRECT</span><h2>Frequency Directory</h2><p id="fdState">Checking…</p></div><div class="action-row"><button id="fdImport">Import list…</button><input id="fdFile" type="file" accept=".csv,text/csv" multiple hidden /></div></div>
+      <form id="fdForm" class="ai-form"><input id="fdQuery" type="search" autocomplete="off" placeholder="Airport, airfield, ICAO code, user or frequency — e.g. leeds bradford, EGNM tower, 134.575" /><button type="submit">Search</button></form>
+      <div class="action-row"><button id="fdScan" disabled>Scan these</button><button id="fdStop" disabled>Stop scan</button></div>
+      <p id="fdScanState" class="notice">Search, then click a row to tune it, or scan everything found.</p>
+      <div id="fdResults" class="list-rows"></div>
     </div>
     <div class="grid two">
       <div class="card function-card"><div><span class="cap front">FRONT PANEL</span><h2>Quick Search / ID Search</h2><p>Func + E/Yes is context-sensitive: Quick Search from channel hold, or ID Search toggle while scanning an eligible trunked Favorites system.</p></div><button data-func="E" data-func-label="Func + E">FUNC + E/YES</button></div>

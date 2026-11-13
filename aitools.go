@@ -35,6 +35,8 @@ Interpreting the operator:
 - Service-type names need not be exact: set_service_types understands everyday words and switches every matching type.
 - "Scan range" (set_range) is how far from the scanner's location the database is used; it is not a frequency range. A frequency range to sweep is a custom search.
 - An address or postcode means set_location_from_address; the operator rarely knows the coordinates.
+- There are two sources. find_channel searches what is programmed in the scanner; lookup_frequency searches the frequency directory, which covers far more (every UK airport, air traffic control, military airfields, nationwide users, repeaters) but is not in the scanner. For "scan Leeds airport" or "listen to Manchester tower": try find_channel first; if the scanner has the place programmed, hold its department. If it has little or nothing, use lookup_frequency, then scan_frequencies with the same query to scan all of it, or tune_frequency with the mhz and mode of the one channel asked for. Say which source you used and list the channels with their frequencies.
+- If a tune or scan reports a note or warning that the scanner tuned a different frequency, pass it on in full: it means the scanner's Band Defaults need correcting on the radio, and the operator has to do that.
 - "Scan the airport", "listen to Leeds Bradford", "scan the council" mean listen to what is already programmed for that place, not move the scanner. Use find_channel for the name; the results carry department_index, so hold that whole department with go_to_channel kind DEPT and it will scan every channel in it. Only change the location or range when the operator asks about where the scanner is or how far it reaches.
 - tune_frequency reports tuned_mhz: the scanner snaps to the step set for the band, so if a note says it landed elsewhere, tell the operator the frequency it actually tuned.
 - If a tool says the scanner has a menu open, call close_menu with exit true and try again. If it says the scanner refused the command in its current state, call set_mode with scan and try once more.
@@ -216,14 +218,68 @@ func (a *App) aiTools() []AITool {
 		{
 			Name:        "tune_frequency",
 			Description: "Tune straight to a frequency in quick search hold, so the radio listens on it. Takes MHz, e.g. 446.00625. The reply gives tuned_mhz, the frequency the scanner actually settled on, and a note if that differs.",
-			Parameters:  schema(map[string]any{"mhz": numProp("Frequency in MHz, 25 to 1300")}, "mhz"),
+			Parameters:  schema(map[string]any{"mhz": numProp("Frequency in MHz, 25 to 1300"), "mode": strProp("Optional modulation: AM for airband, NFM for most land mobile. Pass the mode lookup_frequency gave", "AM", "NFM", "FM", "WFM", "FMB")}, "mhz"),
 			Writes:      true,
 			Run: func(args map[string]any) (any, error) {
 				f, ok := argFloat(args, "mhz")
 				if !ok {
 					return nil, fmt.Errorf("mhz is required")
 				}
-				return a.tuneFrequency(f)
+				return a.tuneFrequency(f, argString(args, "mode"))
+			},
+		},
+		{
+			Name:        "lookup_frequency",
+			Description: "Look a name up in the frequency directory: the operator's own lists of who uses which frequency across the UK (airports and their tower, approach, radar and ATIS channels, air traffic control sectors, military airfields and air-to-air, nationwide business users, amateur repeaters). Use this when the operator names a place or service and wants to know or hear its frequencies, whether or not it is programmed in the scanner. A query that is a frequency returns who is on it. Results carry mhz and mode for tune_frequency, and miles from the scanner where known.",
+			Parameters:  schema(map[string]any{"query": strProp("Name, place, ICAO code, service or frequency, e.g. 'leeds bradford', 'EGNM tower', 'lakenheath', '134.575'"), "limit": intProp("How many results, default 15", 1, 60)}, "query"),
+			Run: func(args map[string]any) (any, error) {
+				q := argString(args, "query")
+				if q == "" {
+					return nil, fmt.Errorf("query is required")
+				}
+				limit, ok := argInt(args, "limit")
+				if !ok {
+					limit = 15
+				}
+				hits, partial := a.freqDir.Search(q, limit, a.scannerPosition())
+				st := a.freqDir.Status()
+				if st["entries"].(int) == 0 {
+					return nil, fmt.Errorf("the frequency directory is empty: no lists have been imported yet. The operator can add CSV lists on the Search page")
+				}
+				out := map[string]any{"results": hits, "searched": st["entries"]}
+				switch {
+				case len(hits) == 0:
+					out["note"] = "nothing in the directory matches; try the place name alone, or its ICAO code"
+				case partial:
+					out["note"] = "no entry matches every word, so these are the closest partial matches; check the names"
+				}
+				return out, nil
+			},
+		},
+		{
+			Name:        "scan_frequencies",
+			Description: "Scan a set of directory frequencies that are not programmed in the scanner: the app tunes each in turn and stays on one while it is active. Give the same query that lookup_frequency answered well, e.g. 'leeds bradford' to scan every channel at that airport. At most 60 frequencies; it holds the radio until stopped. Call with no query to see what the scan is doing.",
+			Parameters:  schema(map[string]any{"query": strProp("Directory search whose results should be scanned"), "limit": intProp("Most frequencies to scan, default 60", 1, 60)}),
+			Writes:      true,
+			Run: func(args map[string]any) (any, error) {
+				q := argString(args, "query")
+				if q == "" {
+					return a.dirScan.Status(), nil
+				}
+				limit, _ := argInt(args, "limit")
+				return a.startDirectoryScan(q, limit)
+			},
+		},
+		{
+			Name:        "stop_frequency_scan",
+			Description: "Stop a directory scan and return the scanner to its normal scan.",
+			Parameters:  schema(map[string]any{}),
+			Writes:      true,
+			Run: func(args map[string]any) (any, error) {
+				was := a.dirScan.Stop(true)
+				st := a.dirScan.Status()
+				st["was_running"] = was
+				return st, nil
 			},
 		},
 		{
