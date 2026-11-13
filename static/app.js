@@ -419,8 +419,7 @@ async function lookupAddress(send){
     const r=Number($('#addrRange').value);
     if(Number.isFinite(r)&&r>0)body.range=r;
     const d=await control('/api/location',body);
-    const g=d.resolved||{};
-    text('#addrResult',`Scanner set to ${g.label||postcode} — ${g.latitude?.toFixed(5)}, ${g.longitude?.toFixed(5)}`);
+    text('#addrResult',`Scanner set to ${d.matched||postcode} — ${Number(d.latitude).toFixed(5)}, ${Number(d.longitude).toFixed(5)}, range ${d.range} miles${d.precision?` (${d.precision}, ${d.source})`:''}`);
     log(`Scanner location set from ${postcode}`,'INFO','CONTROL');
   }catch(e){text('#addrResult',e.message)}
 }
@@ -561,9 +560,10 @@ if($('#tuneForm'))$('#tuneForm').onsubmit=async e=>{
   if(!(mhz>=25&&mhz<=1300)){text('#tuneState','Enter a frequency between 25 and 1300 MHz.');return}
   try{
     text('#tuneState',`Tuning ${mhz} MHz…`);
-    await control('/api/tune',{mhz});
-    text('#tuneState',`Holding on ${mhz} MHz. Press Scan under Scanner Mode to go back to scanning.`);
-    log(`Tuned to ${mhz} MHz`,'INFO','CONTROL');
+    const d=await control('/api/tune',{mhz});
+    const got=d.tuned_mhz?`${Number(d.tuned_mhz).toFixed(5)} MHz`:`${mhz} MHz`;
+    text('#tuneState',d.note?`${d.note[0].toUpperCase()}${d.note.slice(1)}.`:`Holding on ${got}. Press Scan under Scanner Mode to go back to scanning.`);
+    log(d.note?`Tune: asked ${mhz}, scanner tuned ${got}`:`Tuned to ${got}`,d.note?'WARN':'INFO','CONTROL');
     refresh(true);
   }catch(e){text('#tuneState',e.message);log(`Tune: ${e.message}`,'WARN','CONTROL')}
 };

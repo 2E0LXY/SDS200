@@ -35,6 +35,9 @@ Interpreting the operator:
 - Service-type names need not be exact: set_service_types understands everyday words and switches every matching type.
 - "Scan range" (set_range) is how far from the scanner's location the database is used; it is not a frequency range. A frequency range to sweep is a custom search.
 - An address or postcode means set_location_from_address; the operator rarely knows the coordinates.
+- "Scan the airport", "listen to Leeds Bradford", "scan the council" mean listen to what is already programmed for that place, not move the scanner. Use find_channel for the name; the results carry department_index, so hold that whole department with go_to_channel kind DEPT and it will scan every channel in it. Only change the location or range when the operator asks about where the scanner is or how far it reaches.
+- tune_frequency reports tuned_mhz: the scanner snaps to the step set for the band, so if a note says it landed elsewhere, tell the operator the frequency it actually tuned.
+- If a tool says the scanner will not report its location in its current state, call set_mode with scan, then try once more.
 - Programmed names are mostly licence holders, so they read as company names: Elland Road is "Leeds United Football Club Limited", the bin lorries are "Leeds City Council". If a place name finds nothing, search again for the organisation that operates it, then the town, then the service; say which name you found before you jump to it.`
 
 // aiTools builds the tool set bound to this App.
@@ -210,7 +213,7 @@ func (a *App) aiTools() []AITool {
 		},
 		{
 			Name:        "tune_frequency",
-			Description: "Tune straight to a frequency in quick search hold, so the radio listens on it. Takes MHz, e.g. 446.00625.",
+			Description: "Tune straight to a frequency in quick search hold, so the radio listens on it. Takes MHz, e.g. 446.00625. The reply gives tuned_mhz, the frequency the scanner actually settled on, and a note if that differs.",
 			Parameters:  schema(map[string]any{"mhz": numProp("Frequency in MHz, 25 to 1300")}, "mhz"),
 			Writes:      true,
 			Run: func(args map[string]any) (any, error) {
@@ -369,21 +372,18 @@ func (a *App) aiTools() []AITool {
 			Writes:      true,
 			Run: func(args map[string]any) (any, error) {
 				rng, ok := argFloat(args, "range_miles")
-				if !ok || rng < 0 || rng > 999 {
-					return nil, fmt.Errorf("range must be 0-999 miles")
+				if !ok {
+					return nil, fmt.Errorf("range_miles is required")
 				}
-				lat, lon, _, err := a.location()
-				if err != nil {
-					return nil, err
-				}
+				c := locationChange{Range: &rng}
 				if v, ok := argFloat(args, "latitude"); ok {
-					lat = v
+					c.Latitude = &v
 				}
 				if v, ok := argFloat(args, "longitude"); ok {
-					lon = v
+					c.Longitude = &v
 				}
-				wire := fmt.Sprintf("LCR,%.6f,%.6f,%.1f", lat, lon, rng)
-				if _, err := a.execWrite(wire, 2*time.Second); err != nil {
+				lat, lon, rng, err := a.setLocation(c)
+				if err != nil {
 					return nil, err
 				}
 				return map[string]any{"latitude": lat, "longitude": lon, "range_miles": rng}, nil
@@ -415,7 +415,7 @@ func (a *App) aiTools() []AITool {
 				}
 				out := make([]map[string]any, 0, len(res))
 				for _, e := range res {
-					out = append(out, map[string]any{"kind": e.Kind, "index": e.Index, "name": e.Name, "frequency": e.Frequency, "tgid": e.TGID, "modulation": e.Modulation, "path": e.Path()})
+					out = append(out, map[string]any{"kind": e.Kind, "index": e.Index, "name": e.Name, "frequency": e.Frequency, "tgid": e.TGID, "modulation": e.Modulation, "path": e.Path(), "department": e.Department, "department_index": e.DeptIndex, "system": e.System, "system_index": e.SystemIndex})
 				}
 				if len(out) == 0 {
 					if st.Entries == 0 {
@@ -452,7 +452,7 @@ func (a *App) aiTools() []AITool {
 		},
 		{
 			Name:        "go_to_channel",
-			Description: "Jump straight to a programmed item and hold it. Use browse_memory first to get the index. Kind is CFREQ (conventional channel), TGID (talkgroup), DEPT, SITE or SYS.",
+			Description: "Jump straight to a programmed item and hold it. Take the index from find_channel or browse_memory. Kind is CFREQ (conventional channel), TGID (talkgroup), DEPT, SITE or SYS. Holding a DEPT or SYS keeps the scanner scanning everything inside it, which is how to scan one airport or one organisation.",
 			Parameters:  schema(map[string]any{"kind": strProp("Item kind", "CFREQ", "TGID", "DEPT", "SITE", "SYS"), "index": strProp("The item's index from browse_memory")}, "kind", "index"),
 			Writes:      true,
 			Run: func(args map[string]any) (any, error) {
@@ -475,25 +475,15 @@ func (a *App) aiTools() []AITool {
 			Parameters:  schema(map[string]any{"postcode": strProp("UK postcode, e.g. WF3 1AB"), "house_number": strProp("Optional house number or name"), "range_miles": numProp("Optional scan range in miles, 0-999")}, "postcode"),
 			Writes:      true,
 			Run: func(args map[string]any) (any, error) {
-				geo, err := newGeocoder(a.log).Lookup(context.Background(), argString(args, "house_number"), argString(args, "postcode"))
-				if err != nil {
-					return nil, err
-				}
-				_, _, rng, err := a.location()
-				if err != nil {
-					return nil, err
-				}
+				var rng *float64
 				if v, ok := argFloat(args, "range_miles"); ok {
-					if v < 0 || v > 999 {
-						return nil, fmt.Errorf("range must be 0-999 miles")
-					}
-					rng = v
+					rng = &v
 				}
-				wire := fmt.Sprintf("LCR,%.6f,%.6f,%.1f", geo.Latitude, geo.Longitude, rng)
-				if _, err := a.execWrite(wire, 2*time.Second); err != nil {
+				geo, miles, err := a.setLocationFromAddress(context.Background(), argString(args, "house_number"), argString(args, "postcode"), rng)
+				if err != nil {
 					return nil, err
 				}
-				return map[string]any{"latitude": geo.Latitude, "longitude": geo.Longitude, "range_miles": rng, "matched": geo.Label, "precision": geo.Precision, "source": geo.Source}, nil
+				return map[string]any{"latitude": geo.Latitude, "longitude": geo.Longitude, "range_miles": miles, "matched": geo.Label, "precision": geo.Precision, "source": geo.Source}, nil
 			},
 		},
 		{
@@ -687,21 +677,6 @@ func (a *App) serviceTypes() ([]serviceType, error) {
 		out = append(out, serviceType{Slot: i, Name: name, Enabled: strings.TrimSpace(f[i]) == "1", Custom: i >= 37})
 	}
 	return out, nil
-}
-
-func (a *App) location() (lat, lon, rng float64, err error) {
-	res, err := a.command("LCR", 2500*time.Millisecond)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	f := packetFields(res.Raw, "LCR")
-	if len(f) < 3 {
-		return 0, 0, 0, fmt.Errorf("unexpected LCR reply")
-	}
-	lat, _ = strconv.ParseFloat(strings.TrimSpace(f[0]), 64)
-	lon, _ = strconv.ParseFloat(strings.TrimSpace(f[1]), 64)
-	rng, _ = strconv.ParseFloat(strings.TrimSpace(f[2]), 64)
-	return lat, lon, rng, nil
 }
 
 func (a *App) displaySnapshot() (map[string]any, error) {

@@ -134,7 +134,7 @@ const HELP_CARDS = {
   'Tune to Frequency': {
     what: 'Tunes the radio to one frequency and holds there, in quick search hold.',
     why: 'For listening to something you know the frequency of but have not programmed.',
-    how: 'Enter the frequency in MHz, for example 446.00625, and press Tune. The radio works in 100 Hz steps, so the value is rounded to the nearest one. Press Scan under Scanner Mode to resume scanning.',
+    how: 'Enter the frequency in MHz and press Tune. The scanner snaps to the step set for that band, so a frequency between steps lands on the nearest one: 446.00625 becomes 446.0125 on a 12.5 kHz band. The card tells you what it actually tuned. For an exact off-step frequency, set a finer step under Band Defaults on the scanner, or program it as a channel. Press Scan under Scanner Mode to resume scanning.',
   },
   'Quick Search / ID Search': {
     what: 'Func + E/Yes, which is Quick Search from a channel hold and an ID Search toggle while scanning an eligible trunked system.',

@@ -456,20 +456,12 @@ func (a *App) apiFunc(w http.ResponseWriter, r *http.Request) {
 func (a *App) apiLocation(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		res, err := a.command("LCR", 2500*time.Millisecond)
+		lat, lon, rng, err := a.location()
 		if err != nil {
 			errJSON(w, err)
 			return
 		}
-		f := packetFields(res.Raw, "LCR")
-		if len(f) < 3 {
-			errJSON(w, &httpError{502, "unexpected LCR response"})
-			return
-		}
-		lat, _ := strconv.ParseFloat(strings.TrimSpace(f[0]), 64)
-		lon, _ := strconv.ParseFloat(strings.TrimSpace(f[1]), 64)
-		rng, _ := strconv.ParseFloat(strings.TrimSpace(f[2]), 64)
-		writeJSON(w, 200, map[string]any{"latitude": lat, "longitude": lon, "range": rng, "raw": res.Raw})
+		writeJSON(w, 200, map[string]any{"latitude": lat, "longitude": lon, "range": rng})
 	case "POST":
 		if err := a.requireControl(r); err != nil {
 			errJSON(w, err)
@@ -486,60 +478,33 @@ func (a *App) apiLocation(w http.ResponseWriter, r *http.Request) {
 			errJSON(w, err)
 			return
 		}
-		res, err := a.command("LCR", 2500*time.Millisecond)
-		if err != nil {
-			errJSON(w, err)
-			return
-		}
-		f := packetFields(res.Raw, "LCR")
-		if len(f) < 3 {
-			errJSON(w, &httpError{502, "unexpected LCR response"})
-			return
-		}
-		lat, lon, rng := strings.TrimSpace(f[0]), strings.TrimSpace(f[1]), strings.TrimSpace(f[2])
+		c := locationChange{Latitude: b.Latitude, Longitude: b.Longitude, Range: b.Range}
+		out := map[string]any{}
 		// A postcode (with an optional house number) sets the position without
-		// the operator having to find coordinates.
-		var geo *GeoResult
+		// the operator having to find coordinates; explicit coordinates win.
 		if strings.TrimSpace(b.Postcode) != "" {
-			geo, err = newGeocoder(a.log).Lookup(r.Context(), b.House, b.Postcode)
+			geo, err := newGeocoder(a.log).Lookup(r.Context(), b.House, b.Postcode)
 			if err != nil {
 				errJSON(w, &httpError{422, err.Error()})
 				return
 			}
-			lat = strconv.FormatFloat(geo.Latitude, 'f', 6, 64)
-			lon = strconv.FormatFloat(geo.Longitude, 'f', 6, 64)
-		}
-		if b.Latitude != nil {
-			if *b.Latitude < -90 || *b.Latitude > 90 {
-				errJSON(w, &httpError{422, "latitude out of range"})
-				return
+			if c.Latitude == nil {
+				c.Latitude = &geo.Latitude
 			}
-			lat = strconv.FormatFloat(*b.Latitude, 'f', 6, 64)
-		}
-		if b.Longitude != nil {
-			if *b.Longitude < -180 || *b.Longitude > 180 {
-				errJSON(w, &httpError{422, "longitude out of range"})
-				return
+			if c.Longitude == nil {
+				c.Longitude = &geo.Longitude
 			}
-			lon = strconv.FormatFloat(*b.Longitude, 'f', 6, 64)
+			out["matched"], out["precision"], out["source"] = geo.Label, geo.Precision, geo.Source
 		}
-		if b.Range != nil {
-			if *b.Range < 0 || *b.Range > 999 {
-				errJSON(w, &httpError{422, "range must be 0..999"})
-				return
-			}
-			rng = strconv.FormatFloat(*b.Range, 'f', 1, 64)
-		}
-		wire := "LCR," + lat + "," + lon + "," + rng
-		a.log.Info("CONTROL", "Location/range write", map[string]any{"command": wire})
-		d, err := a.execWrite(wire, 1500*time.Millisecond)
+		lat, lon, rng, err := a.setLocation(c)
 		if err != nil {
 			errJSON(w, err)
 			return
 		}
-		a.invalidateState()
-		writeJSON(w, 200, d)
+		out["latitude"], out["longitude"], out["range"] = lat, lon, rng
+		writeJSON(w, 200, out)
 	default:
+		w.Header().Set("Allow", "GET, POST")
 		writeJSON(w, 405, map[string]any{"detail": "method not allowed"})
 	}
 }

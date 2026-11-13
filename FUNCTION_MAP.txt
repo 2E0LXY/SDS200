@@ -61,8 +61,10 @@ Other direct commands used
   JPM,<mode>,<index>        Jump to a mode: SCN_MODE, QSH_MODE, CTM_MODE, CC_MODE,
                             WX_MODE, FTO_MODE, WF_MODE, CDIS_MODE, TDIS_MODE
   QSH,<frequency>           Tune and hold. The unit is 100 Hz: 406.0000 MHz is
-                            4060000. (The assistant used to send Hz, which asked
-                            for a frequency 100 times too high.)
+                            4060000. Verified on the SDS200E 2026-11-13. The
+                            radio then snaps to the step set for the band:
+                            446.00625 MHz (sent as 4460063) tuned 446.012500.
+                            The app reads the frequency back and says so.
   SQK,<fav>                 System quick keys inside a favourites quick key (read)
   DQK,<fav>,<sys>           Department quick keys inside a system quick key (read)
                             SQK/DQK are read-only in the app until their write

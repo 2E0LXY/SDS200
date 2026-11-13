@@ -86,3 +86,52 @@ func TestSetModeRejectsUnknownAndUnsafeInput(t *testing.T) {
 		}
 	}
 }
+
+func TestParseLCR(t *testing.T) {
+	lat, lon, rng, ok := parseLCR("LCR,53.865900,-1.660600,10.0\r")
+	if !ok || lat != 53.8659 || lon != -1.6606 || rng != 10 {
+		t.Fatalf("parseLCR = %v %v %v %v", lat, lon, rng, ok)
+	}
+	for _, bad := range []string{"", "LCR,NG\r", "LCR,ERR\r", "LCR,53.8,-1.6\r", "LCR,a,b,c\r", "STS,1,2,3\r"} {
+		if _, _, _, ok := parseLCR(bad); ok {
+			t.Errorf("parseLCR(%q) was accepted", bad)
+		}
+	}
+}
+
+// A failed location read must say what the scanner answered; "unexpected LCR
+// reply" left the operator and the assistant with nothing to act on.
+func TestLCRErrorCarriesTheReply(t *testing.T) {
+	if msg := lcrError("LCR,NG\r").Error(); !strings.Contains(msg, "LCR,NG") || !strings.Contains(msg, "scan mode") {
+		t.Errorf("refusal not explained: %q", msg)
+	}
+	if msg := lcrError("").Error(); !strings.Contains(msg, "(nothing)") {
+		t.Errorf("empty reply not reported: %q", msg)
+	}
+}
+
+func TestSetLocationValidatesBeforeTouchingTheScanner(t *testing.T) {
+	a := &App{}
+	f := func(v float64) *float64 { return &v }
+	for _, c := range []locationChange{{Latitude: f(91)}, {Longitude: f(-181)}, {Range: f(1000)}, {Range: f(-1)}} {
+		if _, _, _, err := a.setLocation(c); err == nil {
+			t.Errorf("setLocation(%+v) accepted an out-of-range value", c)
+		}
+	}
+}
+
+func TestParseMHz(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want float64
+	}{{"446.012500MHz", 446.0125}, {"453.675000 MHz", 453.675}, {"4460125", 446.0125}, {"121.5", 121.5}} {
+		if got, ok := parseMHz(c.in); !ok || got != c.want {
+			t.Errorf("parseMHz(%q) = %v, %v", c.in, got, ok)
+		}
+	}
+	for _, bad := range []string{"", "—", "<nil>", "0"} {
+		if _, ok := parseMHz(bad); ok {
+			t.Errorf("parseMHz(%q) was accepted", bad)
+		}
+	}
+}

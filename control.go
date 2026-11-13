@@ -7,6 +7,7 @@ package main
 // input shape and then call the same method.
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -53,8 +54,9 @@ func (a *App) setMode(mode, index string) (map[string]any, error) {
 }
 
 // qshUnits converts MHz to the unit QSH takes, which is 100 Hz: 406.0000 MHz
-// is sent as 4060000. Channels on a 6.25 kHz raster do not land on a 100 Hz
-// boundary (446.00625 MHz), so the value is rounded to the nearest step.
+// is sent as 4060000 (confirmed on an SDS200E: the radio tuned what was sent,
+// to within its band step). Channels on a 6.25 kHz raster do not land on a
+// 100 Hz boundary (446.00625 MHz), so the value is rounded to the nearest.
 func qshUnits(mhz float64) (int, error) {
 	if math.IsNaN(mhz) || mhz < 25 || mhz > 1300 {
 		return 0, &httpError{422, "frequency must be between 25 and 1300 MHz"}
@@ -74,7 +76,35 @@ func (a *App) tuneFrequency(mhz float64) (map[string]any, error) {
 	}
 	a.invalidateState()
 	time.Sleep(500 * time.Millisecond)
-	return a.readState(true), nil
+	st := a.readState(true)
+	st["requested_mhz"] = float64(units) / 1e4
+	// The scanner does not tune QSH's frequency exactly: quick search snaps to
+	// the step set for that band, so 446.00625 on a 12.5 kHz band lands on
+	// 446.0125. Say so rather than let the operator think they are on channel.
+	if got, ok := parseMHz(fmt.Sprint(st["frequency"])); ok {
+		st["tuned_mhz"] = got
+		if math.Abs(got-float64(units)/1e4) > 0.00011 {
+			st["note"] = fmt.Sprintf("the scanner tuned %.5f MHz, not %.5f: quick search uses the step set for this band. To reach the exact frequency, set a finer step for the band under Settings > Band Defaults on the scanner, or program it as a channel", got, float64(units)/1e4)
+		}
+	}
+	return st, nil
+}
+
+// parseMHz reads a frequency as the scanner reports it: "446.012500MHz", or a
+// bare count of 100 Hz units.
+func parseMHz(s string) (float64, bool) {
+	s = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(strings.ToUpper(s)), "MHZ"))
+	if s == "" {
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || f <= 0 {
+		return 0, false
+	}
+	if !strings.Contains(s, ".") && f >= 250000 {
+		f /= 1e4
+	}
+	return f, true
 }
 
 // ---------------------------------------------------------------- quick keys
@@ -181,6 +211,119 @@ func (a *App) setFavouriteQuickKey(key int, enabled bool) error {
 	}
 	_, err = a.writeFavouriteQuickKeys(set.States)
 	return err
+}
+
+// ---------------------------------------------------------- location & range
+//
+// LCR reads or writes the scanner's latitude, longitude and scan range. The
+// scanner does not answer it in every state: straight after a mode change, or
+// while a menu or direct entry is open, the reply can be missing fields or a
+// bare NG. So a read is retried, and when it still fails the error carries the
+// reply itself rather than the word "unexpected".
+
+func parseLCR(raw string) (lat, lon, rng float64, ok bool) {
+	f := packetFields(raw, "LCR")
+	if len(f) < 3 {
+		return 0, 0, 0, false
+	}
+	var e1, e2, e3 error
+	lat, e1 = strconv.ParseFloat(strings.TrimSpace(f[0]), 64)
+	lon, e2 = strconv.ParseFloat(strings.TrimSpace(f[1]), 64)
+	rng, e3 = strconv.ParseFloat(strings.TrimSpace(f[2]), 64)
+	return lat, lon, rng, e1 == nil && e2 == nil && e3 == nil
+}
+
+// lcrError explains a reply that could not be read as a location.
+func lcrError(raw string) error {
+	reply := strings.TrimSpace(raw)
+	if reply == "" {
+		reply = "(nothing)"
+	}
+	if len(reply) > 80 {
+		reply = reply[:80] + "…"
+	}
+	up := strings.ToUpper(reply)
+	if strings.Contains(up, "NG") || strings.Contains(up, "ERR") {
+		return &httpError{409, fmt.Sprintf("the scanner will not report its location in its current state (it answered %q). Close any open menu, or return to scan mode, and try again", reply)}
+	}
+	return &httpError{502, fmt.Sprintf("the scanner's location reply could not be read (it answered %q)", reply)}
+}
+
+func (a *App) location() (lat, lon, rng float64, err error) {
+	var raw string
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			time.Sleep(350 * time.Millisecond)
+		}
+		res, cerr := a.command("LCR", 2500*time.Millisecond)
+		if cerr != nil {
+			err = cerr
+			continue
+		}
+		raw, err = res.Raw, nil
+		if la, lo, r, ok := parseLCR(res.Raw); ok {
+			return la, lo, r, nil
+		}
+	}
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return 0, 0, 0, lcrError(raw)
+}
+
+// locationChange is what to alter; nil fields keep the scanner's value.
+type locationChange struct {
+	Latitude, Longitude, Range *float64
+}
+
+// setLocation writes the scanner's position and range. The current values are
+// only read when something is being kept, so setting all three does not
+// depend on the scanner being able to report them.
+func (a *App) setLocation(c locationChange) (lat, lon, rng float64, err error) {
+	if c.Latitude != nil && (*c.Latitude < -90 || *c.Latitude > 90) {
+		return 0, 0, 0, &httpError{422, "latitude must be -90 to 90"}
+	}
+	if c.Longitude != nil && (*c.Longitude < -180 || *c.Longitude > 180) {
+		return 0, 0, 0, &httpError{422, "longitude must be -180 to 180"}
+	}
+	if c.Range != nil && (*c.Range < 0 || *c.Range > 999) {
+		return 0, 0, 0, &httpError{422, "range must be 0-999 miles"}
+	}
+	if c.Latitude == nil || c.Longitude == nil || c.Range == nil {
+		if lat, lon, rng, err = a.location(); err != nil {
+			return 0, 0, 0, err
+		}
+	}
+	if c.Latitude != nil {
+		lat = *c.Latitude
+	}
+	if c.Longitude != nil {
+		lon = *c.Longitude
+	}
+	if c.Range != nil {
+		rng = *c.Range
+	}
+	wire := fmt.Sprintf("LCR,%.6f,%.6f,%.1f", lat, lon, rng)
+	a.log.Info("CONTROL", "Location/range write", map[string]any{"command": wire})
+	if _, err = a.execWrite(wire, 2*time.Second); err != nil {
+		return 0, 0, 0, err
+	}
+	a.invalidateState()
+	return lat, lon, rng, nil
+}
+
+// setLocationFromAddress resolves a UK postcode (and optional house number)
+// and writes it, with the range too if one is given.
+func (a *App) setLocationFromAddress(ctx context.Context, house, postcode string, rangeMiles *float64) (*GeoResult, float64, error) {
+	geo, err := newGeocoder(a.log).Lookup(ctx, house, postcode)
+	if err != nil {
+		return nil, 0, &httpError{422, err.Error()}
+	}
+	_, _, rng, err := a.setLocation(locationChange{Latitude: &geo.Latitude, Longitude: &geo.Longitude, Range: rangeMiles})
+	if err != nil {
+		return nil, 0, err
+	}
+	return geo, rng, nil
 }
 
 // ------------------------------------------------------------- HTTP surface
