@@ -310,8 +310,11 @@ func (a *App) apiHold(w http.ResponseWriter, r *http.Request) {
 	wire := holdWire(scope, before)
 	if wire != "" {
 		if _, err := a.execWrite(wire, 1250*time.Millisecond); err != nil {
-			errJSON(w, err)
-			return
+			// A refused HLD still has the soft keys to fall back on.
+			if !isRefusal(err) || a.pressKeys(keys) != nil {
+				errJSON(w, err)
+				return
+			}
 		}
 	} else {
 		if err := a.pressKeys(keys); err != nil {
@@ -695,12 +698,14 @@ func (a *App) apiMenu(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, "GET") {
 		return
 	}
-	d, err := a.execWrite("MSI", 2*time.Second)
+	// A plain read: outside a menu the scanner answers MSI,ERR, which is an
+	// answer, not a failure.
+	res, err := a.command("MSI", 2*time.Second)
 	if err != nil {
 		errJSON(w, err)
 		return
 	}
-	writeJSON(w, 200, d)
+	writeJSON(w, 200, map[string]any{"command": res.Command, "raw": res.Raw, "elapsed_ms": res.ElapsedMS})
 }
 
 func (a *App) apiWaterfallStatus(w http.ResponseWriter, r *http.Request) {
@@ -1262,6 +1267,7 @@ func (a *App) apiServiceTypes(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		a.log.Info("CONTROL", "Service types write", nil)
+		a.prepareForWrite()
 		d, err := a.execWrite("SVC,"+joinInts(b.States), 2*time.Second)
 		if err != nil {
 			errJSON(w, err)
@@ -1607,16 +1613,21 @@ func (a *App) apiMenuBack(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, err)
 		return
 	}
-	level := ""
 	if b.Exit {
-		level = "RETURN_PREVOUS_MODE"
+		// Leaving altogether: the scanner may not answer, and is deaf for a
+		// few seconds afterwards, which leaveMenu waits out.
+		if _, _, err := a.leaveMenu(); err != nil {
+			errJSON(w, err)
+			return
+		}
+	} else {
+		if _, err := a.execWrite("MSB,,", 2500*time.Millisecond); err != nil {
+			errJSON(w, err)
+			return
+		}
+		a.invalidateState()
+		time.Sleep(350 * time.Millisecond)
 	}
-	if _, err := a.execWrite("MSB,,"+level, 2500*time.Millisecond); err != nil {
-		errJSON(w, err)
-		return
-	}
-	a.invalidateState()
-	time.Sleep(350 * time.Millisecond)
 	a.writeMenuSnapshot(w)
 }
 

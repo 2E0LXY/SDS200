@@ -72,7 +72,7 @@ const HELP_CARDS = {
   'Scanner Entry / Confirmation': {
     what: 'The scanner’s own screen, read back over the network after every key.',
     why: 'Confirms the radio actually did what the key asked, and lets you drive the scanner’s menus without guessing what is on screen.',
-    how: 'Press Menu to open the scanner menu, then click any line to select it. Back steps up a level, Exit leaves the menu. Refresh re-reads the screen.',
+    how: 'Press Menu to open the scanner menu, then click any line to select it. Back steps up a level, Exit leaves the menu. Refresh re-reads the screen. Moving from this page or the Dashboard to any other page closes the menu and returns the scanner to what it was doing, because while it is in a menu it refuses most other commands.',
   },
 
   // ---- Memory ---------------------------------------------------------

@@ -8,9 +8,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +46,7 @@ func (a *App) setMode(mode, index string) (map[string]any, error) {
 	if strings.ContainsAny(index, ",\r\n") {
 		return nil, &httpError{422, "the mode index cannot contain a comma or a line break"}
 	}
+	a.prepareForWrite()
 	a.log.Info("CONTROL", "Mode change requested", map[string]any{"mode": target, "index": index})
 	if _, err := a.execWrite("JPM,"+target+","+index, 2500*time.Millisecond); err != nil {
 		return nil, err
@@ -70,6 +73,7 @@ func (a *App) tuneFrequency(mhz float64) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.prepareForWrite()
 	a.log.Info("CONTROL", "Tune requested", map[string]any{"mhz": mhz, "qsh": units})
 	if _, err := a.execWrite(fmt.Sprintf("QSH,%d", units), 2500*time.Millisecond); err != nil {
 		return nil, err
@@ -173,7 +177,7 @@ func (a *App) quickKeys(kind string, fav, sys int) (*quickKeySet, error) {
 	}
 	fields := packetFields(res.Raw, cmd)
 	if len(fields) < 100 {
-		return nil, &httpError{502, fmt.Sprintf("the scanner answered %s with %d fields, not the 100 states expected", cmd, len(fields))}
+		return nil, a.explainReply(cmd, res.Raw, "its quick keys")
 	}
 	return &quickKeySet{Kind: strings.ToLower(cmd), Fav: fav, Sys: sys, States: parseQuickKeyStates(fields), Raw: res.Raw, Elapsed: res.ElapsedMS}, nil
 }
@@ -188,6 +192,7 @@ func (a *App) writeFavouriteQuickKeys(states []int) (map[string]any, error) {
 			return nil, &httpError{422, "FQK states must be 0/1/2"}
 		}
 	}
+	a.prepareForWrite()
 	a.log.Info("CONTROL", "Favorites Quick Keys write", map[string]any{"count": 100})
 	return a.execWrite("FQK,"+joinInts(states), 2*time.Second)
 }
@@ -213,13 +218,149 @@ func (a *App) setFavouriteQuickKey(key int, enabled bool) error {
 	return err
 }
 
+// ------------------------------------------------- when the scanner says no
+//
+// The scanner answers a command it will not carry out with "<CMD>,ERR" or
+// "<CMD>,NG". The commonest reason is that a menu is open on the radio: in
+// menu mode it refuses almost everything except the menu commands. Nothing
+// used to check for this, so a refused write was reported as done and a
+// refused read surfaced as "returned 1 fields, expected 47".
+
+// refusal is an error for a command the scanner declined. It unwraps to an
+// httpError, so handlers report it like any other.
+type refusal struct{ *httpError }
+
+func (r refusal) Unwrap() error { return r.httpError }
+
+func isRefusal(err error) bool {
+	var r refusal
+	return errors.As(err, &r)
+}
+
+// replyRefused reports whether raw is "<CMD>,ERR" or "<CMD>,NG".
+func replyRefused(raw string) bool {
+	line := strings.TrimSpace(raw)
+	if i := strings.IndexAny(line, "\r\n"); i >= 0 {
+		line = line[:i]
+	}
+	parts := strings.Split(line, ",")
+	if len(parts) != 2 {
+		return false
+	}
+	v := strings.ToUpper(strings.TrimSpace(parts[1]))
+	return v == "ERR" || v == "NG"
+}
+
+var (
+	gsiMenuMode = regexp.MustCompile(`Mode="Menu tree"`)
+	gsiMenuName = regexp.MustCompile(`<MenuSummary[^>]*\bname="([^"]*)"`)
+)
+
+// openMenu reports whether the scanner is in its menu, and which one.
+func (a *App) openMenu() (name string, open bool) {
+	res, err := a.command("GSI", 1500*time.Millisecond)
+	if err != nil || !gsiMenuMode.MatchString(res.Raw) {
+		return "", false
+	}
+	if m := gsiMenuName.FindStringSubmatch(res.Raw); m != nil {
+		// The top level reports itself as "       --- M E N U ---".
+		name = strings.Trim(m[1], " -")
+		if strings.EqualFold(strings.ReplaceAll(name, " ", ""), "MENU") {
+			name = ""
+		}
+	}
+	return name, true
+}
+
+// refusalFor builds the error for a refused command, saying why if it can.
+func (a *App) refusalFor(cmd, raw string) error {
+	reply := strings.TrimSpace(raw)
+	if name, open := a.openMenu(); open {
+		what := "a menu"
+		if name != "" {
+			what = fmt.Sprintf("the %q menu", name)
+		}
+		return refusal{&httpError{409, fmt.Sprintf("the scanner has %s open, and while it is in a menu it refuses %s (it answered %q). Press Exit menu on the Control page, or ask the assistant to close the menu, then try again", what, cmd, reply)}}
+	}
+	return refusal{&httpError{409, fmt.Sprintf("the scanner refused %s in its current state (it answered %q). Returning it to scan mode usually clears this", cmd, reply)}}
+}
+
+// explainReply turns a reply that could not be read into an error that says
+// what the scanner answered.
+func (a *App) explainReply(cmd, raw, what string) error {
+	if replyRefused(raw) {
+		return a.refusalFor(cmd, raw)
+	}
+	reply := strings.TrimSpace(raw)
+	if reply == "" {
+		reply = "(nothing)"
+	}
+	if len(reply) > 80 {
+		reply = reply[:80] + "…"
+	}
+	return &httpError{502, fmt.Sprintf("the scanner's reply to %s could not be read as %s (it answered %q)", cmd, what, reply)}
+}
+
+// leaveMenu takes the scanner out of its menu, back to what it was doing
+// before. It reports the menu's name and whether one was open at all.
+//
+// The scanner often does not answer MSB when leaving the menu altogether, and
+// then ignores everything for several seconds while it goes back to scanning
+// (about six on an SDS200E leaving Manage Full Database). So the reply is not
+// required; leaveMenu waits instead until the scanner answers again and is no
+// longer in the menu.
+func (a *App) leaveMenu() (name string, wasOpen bool, err error) {
+	name, open := a.openMenu()
+	if !open {
+		return "", false, nil
+	}
+	a.log.Info("CONTROL", "Leaving the scanner menu", map[string]any{"menu": name})
+	_, _ = a.command("MSB,,RETURN_PREVOUS_MODE", 1500*time.Millisecond)
+	a.invalidateState()
+	deadline := time.Now().Add(12 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(400 * time.Millisecond)
+		res, cerr := a.command("GSI", 1200*time.Millisecond)
+		if cerr == nil && !gsiMenuMode.MatchString(res.Raw) {
+			a.invalidateState()
+			return name, true, nil
+		}
+	}
+	a.log.Warn("CONTROL", "The scanner did not leave its menu", map[string]any{"menu": name})
+	return name, true, &httpError{504, "the scanner did not leave its menu within 12 seconds"}
+}
+
+// prepareForWrite gets the scanner ready to accept a setting. If a menu is
+// open it is closed first, because the operator has asked for something the
+// scanner will refuse while it is in one.
+func (a *App) prepareForWrite() {
+	_, _, _ = a.leaveMenu()
+}
+
+// apiMenuLeave closes the scanner's menu if one is open. The web UI calls it
+// when the operator moves away from the pages that show the menu, so the
+// radio is not left sitting in a menu nobody is looking at.
+func (a *App) apiMenuLeave(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, "POST") {
+		return
+	}
+	if err := a.requireControl(r); err != nil {
+		errJSON(w, err)
+		return
+	}
+	name, wasOpen, err := a.leaveMenu()
+	if err != nil {
+		errJSON(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"closed": wasOpen, "menu": name})
+}
+
 // ---------------------------------------------------------- location & range
 //
-// LCR reads or writes the scanner's latitude, longitude and scan range. The
-// scanner does not answer it in every state: straight after a mode change, or
-// while a menu or direct entry is open, the reply can be missing fields or a
-// bare NG. So a read is retried, and when it still fails the error carries the
-// reply itself rather than the word "unexpected".
+// LCR reads or writes the scanner's latitude, longitude and scan range. While
+// a menu is open on the radio it answers LCR,ERR (seen on an SDS200E), so a
+// read is retried and, if it still fails, explained by explainReply.
 
 func parseLCR(raw string) (lat, lon, rng float64, ok bool) {
 	f := packetFields(raw, "LCR")
@@ -231,22 +372,6 @@ func parseLCR(raw string) (lat, lon, rng float64, ok bool) {
 	lon, e2 = strconv.ParseFloat(strings.TrimSpace(f[1]), 64)
 	rng, e3 = strconv.ParseFloat(strings.TrimSpace(f[2]), 64)
 	return lat, lon, rng, e1 == nil && e2 == nil && e3 == nil
-}
-
-// lcrError explains a reply that could not be read as a location.
-func lcrError(raw string) error {
-	reply := strings.TrimSpace(raw)
-	if reply == "" {
-		reply = "(nothing)"
-	}
-	if len(reply) > 80 {
-		reply = reply[:80] + "…"
-	}
-	up := strings.ToUpper(reply)
-	if strings.Contains(up, "NG") || strings.Contains(up, "ERR") {
-		return &httpError{409, fmt.Sprintf("the scanner will not report its location in its current state (it answered %q). Close any open menu, or return to scan mode, and try again", reply)}
-	}
-	return &httpError{502, fmt.Sprintf("the scanner's location reply could not be read (it answered %q)", reply)}
 }
 
 func (a *App) location() (lat, lon, rng float64, err error) {
@@ -268,7 +393,7 @@ func (a *App) location() (lat, lon, rng float64, err error) {
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	return 0, 0, 0, lcrError(raw)
+	return 0, 0, 0, a.explainReply("LCR", raw, "its location")
 }
 
 // locationChange is what to alter; nil fields keep the scanner's value.
@@ -289,6 +414,7 @@ func (a *App) setLocation(c locationChange) (lat, lon, rng float64, err error) {
 	if c.Range != nil && (*c.Range < 0 || *c.Range > 999) {
 		return 0, 0, 0, &httpError{422, "range must be 0-999 miles"}
 	}
+	a.prepareForWrite()
 	if c.Latitude == nil || c.Longitude == nil || c.Range == nil {
 		if lat, lon, rng, err = a.location(); err != nil {
 			return 0, 0, 0, err

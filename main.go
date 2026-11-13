@@ -255,6 +255,15 @@ func (a *App) execWrite(wire string, timeout time.Duration) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
+	// "<CMD>,ERR" or "<CMD>,NG" means the scanner did not do it. Reporting
+	// that as success is how a refused write used to look like it had worked.
+	if replyRefused(r.Raw) {
+		cmd := wire
+		if i := strings.IndexByte(cmd, ','); i >= 0 {
+			cmd = cmd[:i]
+		}
+		return nil, a.refusalFor(cmd, r.Raw)
+	}
 	return map[string]any{"command": r.Command, "raw": r.Raw, "elapsed_ms": r.ElapsedMS}, nil
 }
 
@@ -430,6 +439,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("/api/menu/state", a.apiMenuState)
 	mux.HandleFunc("/api/menu/select", a.apiMenuSelect)
 	mux.HandleFunc("/api/menu/back", a.apiMenuBack)
+	mux.HandleFunc("/api/menu/leave", a.apiMenuLeave)
 	mux.HandleFunc("/api/service-types", a.apiServiceTypes)
 	mux.HandleFunc("/api/clock", a.apiClock)
 	mux.HandleFunc("/api/ai", a.apiAI)

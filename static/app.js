@@ -588,3 +588,26 @@ if($('#lowerQkRead'))$('#lowerQkRead').onclick=async()=>{
     text('#lowerQkState',`${dept?`Department quick keys in favourites ${fav}, system ${sys}`:`System quick keys in favourites ${fav}`}: ${used} assigned, ${on} enabled. Green = enabled, grey = disabled, dim = not assigned.`);
   }catch(e){grid.innerHTML='';text('#lowerQkState',e.message)}
 };
+
+
+// ---- Leave the scanner's menu when the operator leaves the pages that show it
+// The menu is only visible on the Dashboard (0) and Control (2) pages. Moving
+// from one of those to any other page returns the scanner to what it was doing,
+// so it is never left sitting in a menu nobody is looking at. The check waits
+// for the page to settle: a smooth scroll passes through every page on the way,
+// and "Open Menu" on another page jumps to Control, which must not close it.
+const MENU_PAGES=new Set([0,2]);
+let settledPage=activePage,settleTimer=null;
+function pageSettled(){
+  const prev=settledPage,next=activePage;
+  settledPage=next;
+  if(prev===next||!MENU_PAGES.has(prev)||MENU_PAGES.has(next))return;
+  if(!lease)return; // a view-only client does not change the radio
+  api('/api/menu/leave',{method:'POST',headers:headers(true),body:'{}'}).then(d=>{
+    if(!d.closed)return;
+    log(`Left the scanner menu${d.menu?` “${d.menu}”`:''} on leaving the page`,'INFO','CONTROL');
+    applyMenuState({in_menu:false,items:[],title:'',menu_type:''});
+    refresh(true);
+  }).catch(e=>log(`Menu: ${e.message}`,'WARN','CONTROL'));
+}
+pages.addEventListener('scroll',()=>{clearTimeout(settleTimer);settleTimer=setTimeout(pageSettled,450)},{passive:true});

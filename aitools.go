@@ -37,7 +37,9 @@ Interpreting the operator:
 - An address or postcode means set_location_from_address; the operator rarely knows the coordinates.
 - "Scan the airport", "listen to Leeds Bradford", "scan the council" mean listen to what is already programmed for that place, not move the scanner. Use find_channel for the name; the results carry department_index, so hold that whole department with go_to_channel kind DEPT and it will scan every channel in it. Only change the location or range when the operator asks about where the scanner is or how far it reaches.
 - tune_frequency reports tuned_mhz: the scanner snaps to the step set for the band, so if a note says it landed elsewhere, tell the operator the frequency it actually tuned.
-- If a tool says the scanner will not report its location in its current state, call set_mode with scan, then try once more.
+- If a tool says the scanner has a menu open, call close_menu with exit true and try again. If it says the scanner refused the command in its current state, call set_mode with scan and try once more.
+- For an airport, put the word airport in the find_channel query ("leeds airport"): the list is called Airports, and it separates the airfield from the council and the football club. The operator's lists may hold only some of an airport's channels, or none; say exactly which ones you found and held, and do not imply the rest are being scanned.
+- Never invent a postcode. If the operator has not given one, do not call set_location_from_address.
 - Programmed names are mostly licence holders, so they read as company names: Elland Road is "Leeds United Football Club Limited", the bin lorries are "Leeds City Council". If a place name finds nothing, search again for the organisation that operates it, then the town, then the service; say which name you found before you jump to it.`
 
 // aiTools builds the tool set bound to this App.
@@ -241,6 +243,7 @@ func (a *App) aiTools() []AITool {
 			}),
 			Writes: true,
 			Run: func(args map[string]any) (any, error) {
+				a.prepareForWrite()
 				cur, err := a.serviceTypes()
 				if err != nil {
 					return nil, err
@@ -631,11 +634,13 @@ func (a *App) aiTools() []AITool {
 			Parameters:  schema(map[string]any{"exit": boolProp("true to leave menu mode entirely, false for one level back")}),
 			Writes:      true,
 			Run: func(args map[string]any) (any, error) {
-				level := ""
 				if e, ok := argBool(args, "exit"); ok && e {
-					level = "RETURN_PREVOUS_MODE"
+					if _, _, err := a.leaveMenu(); err != nil {
+						return nil, err
+					}
+					return a.displaySnapshot()
 				}
-				if _, err := a.execWrite("MSB,,"+level, 2500*time.Millisecond); err != nil {
+				if _, err := a.execWrite("MSB,,", 2500*time.Millisecond); err != nil {
 					return nil, err
 				}
 				a.invalidateState()
@@ -664,7 +669,7 @@ func (a *App) serviceTypes() ([]serviceType, error) {
 	}
 	f := packetFields(res.Raw, "SVC")
 	if len(f) < 47 {
-		return nil, fmt.Errorf("SVC returned %d fields, expected 47", len(f))
+		return nil, a.explainReply("SVC", res.Raw, "47 service types")
 	}
 	out := make([]serviceType, 0, 47)
 	for i := 0; i < 47; i++ {

@@ -99,14 +99,31 @@ func TestParseLCR(t *testing.T) {
 	}
 }
 
-// A failed location read must say what the scanner answered; "unexpected LCR
-// reply" left the operator and the assistant with nothing to act on.
-func TestLCRErrorCarriesTheReply(t *testing.T) {
-	if msg := lcrError("LCR,NG\r").Error(); !strings.Contains(msg, "LCR,NG") || !strings.Contains(msg, "scan mode") {
-		t.Errorf("refusal not explained: %q", msg)
+// The scanner answers a command it will not carry out with ERR or NG. Seen on
+// an SDS200E with a menu open: SVC,ERR and LCR,ERR.
+func TestReplyRefused(t *testing.T) {
+	for _, raw := range []string{"SVC,ERR\r", "LCR,ERR\r", "FQK,NG\r", " qsh,err \r\n"} {
+		if !replyRefused(raw) {
+			t.Errorf("replyRefused(%q) = false", raw)
+		}
 	}
-	if msg := lcrError("").Error(); !strings.Contains(msg, "(nothing)") {
-		t.Errorf("empty reply not reported: %q", msg)
+	for _, raw := range []string{"", "LCR,OK\r", "LCR,53.8,-1.6,10.0\r", "SVC,1,0,1\r", "GSI,<XML>,\r<x Mode=\"ERR\"/>", "KEY,OK\r"} {
+		if replyRefused(raw) {
+			t.Errorf("replyRefused(%q) = true", raw)
+		}
+	}
+}
+
+func TestMenuDetectionFromGSI(t *testing.T) {
+	menu := "GSI,<XML>,\r<?xml version=\"1.0\" encoding=\"utf-8\"?>\r<ScannerInfo Mode=\"Menu tree\" V_Screen=\"menu_selection\">\r  <MenuSummary name=\"Manage Full Database\" index=\"4293048892\" />\r</ScannerInfo>\r"
+	if !gsiMenuMode.MatchString(menu) {
+		t.Fatal("menu mode not recognised")
+	}
+	if m := gsiMenuName.FindStringSubmatch(menu); m == nil || m[1] != "Manage Full Database" {
+		t.Fatalf("menu name = %v", m)
+	}
+	if gsiMenuMode.MatchString("<ScannerInfo Mode=\"Scan Mode\" V_Screen=\"conventional_scan\">") {
+		t.Fatal("scan mode mistaken for a menu")
 	}
 }
 

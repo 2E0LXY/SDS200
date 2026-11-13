@@ -70,6 +70,22 @@ Other direct commands used
                             SQK/DQK are read-only in the app until their write
                             form has been checked against a radio.
 
+While a menu is open (verified on the SDS200E, 2026-11-13)
+---------------------------------------------------------
+GSI reports Mode="Menu tree", and the scanner answers SVC, LCR and most other
+commands with "<CMD>,ERR". The app used to treat that as a malformed reply
+("SVC returned 1 fields, expected 47") and reported refused writes as done.
+  - Every write is now checked for ERR / NG and fails with the reason.
+  - A read explains that a menu is open and names it.
+  - A write that needs normal operation (mode, tune, location, service types,
+    favourites quick keys) leaves the menu first.
+  - Leaving the Dashboard or Control page for any other page leaves the menu.
+MSB,,RETURN_PREVOUS_MODE often gets no reply, and the scanner then ignores
+commands for several seconds (about six leaving Manage Full Database), so the
+app polls GSI until it answers and is out of the menu instead of waiting on MSB.
+SQK,<fav> and DQK,<fav>,<sys> reads return their selector fields followed by
+100 states; confirmed against the radio.
+
 Where each function lives in the web app
 ----------------------------------------
   Scanner     what is being heard now; holds, avoid, previous / next
